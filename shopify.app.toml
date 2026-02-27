@@ -1,0 +1,20 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "24896c6332888255fec54723caeee71f"
+name = "de-extension-app"
+application_url = "https://shopify.dev/apps/default-app-home"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2026-04"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customers, write_customers, read_orders, write_orders, read_metaobjects, write_metaobjects, customer_write_customers, customer_read_customers, customer_read_metaobjects"
+
+
+[auth]
+redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth", "https://webhook.site/8f65b8d5-fdeb-4fa8-83df-d6ac43a623f6" ]
