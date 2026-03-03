@@ -18,6 +18,12 @@ function Extension() {
   const [expandedSubscriptions, setExpandedSubscriptions] = useState([]);
   const [deletingSubscriptionId, setDeletingSubscriptionId] = useState('');
   const [deletingCardId, setDeletingCardId] = useState('');
+  const [confirmingCardId, setConfirmingCardId] = useState(null);
+  const [confirmingSubscriptionId, setConfirmingSubscriptionId] = useState(null);
+  const [editingItems, setEditingItems] = useState({});
+  const [editingStatus, setEditingStatus] = useState({});
+  const [savingSubscriptionId, setSavingSubscriptionId] = useState('');
+  const [variantDetails, setVariantDetails] = useState({});
 
   const API_VERSION = '2026-01';
   const getCustomerIdQuery = {
@@ -61,21 +67,22 @@ function Extension() {
     }
   }, [fetchCustomerId]);
 
-  const handleDeleteCard = useCallback(async (cardId, token) => {
+  const handleDeleteCard = useCallback(async (cardId) => {
     // TODO: point this to your backend endpoint that deletes
     // the moneris_card metaobject and vault token.
-    const url = 'https://3348-184-148-133-49.ngrok-free.app/delete-moneris-card';
+    const url = 'https://3348-184-148-133-49.ngrok-free.app/card/delete';
 
     setDeletingCardId(cardId);
     setCardsError('');
 
     try {
+      const customerGid = await fetchCustomerId();
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({cardId, token}),
+        body: JSON.stringify({cardId, customerGid}),
       });
 
       if (!response.ok) {
@@ -91,7 +98,7 @@ function Extension() {
     } finally {
       setDeletingCardId('');
     }
-  }, []);
+  }, [fetchCustomerId]);
 
   const loadCards = useCallback(async () => {
     setCardsError('');
@@ -225,11 +232,15 @@ function Extension() {
         const fieldValue = (key) =>
           (fields.find((field) => field.key === key) || {}).value || '';
 
-        let items = [];
+        let subscriptionLineItems = { currency: 'CAD', items: [] };
         try {
           const rawItems = fieldValue('subscription_line_items');
           if (rawItems) {
-            items = JSON.parse(rawItems);
+            const parsed = JSON.parse(rawItems);
+            subscriptionLineItems = {
+              currency: parsed.currency || 'CAD',
+              items: Array.isArray(parsed.items) ? parsed.items : [],
+            };
           }
         } catch (_err) {
           // ignore JSON parse errors and leave items empty
@@ -240,7 +251,8 @@ function Extension() {
           status: fieldValue('status'),
           nextBillingDate: fieldValue('next_billing_date'),
           createdAt: fieldValue('last_billed_at'),
-          items,
+          subscriptionLineItems,
+          items: subscriptionLineItems.items,
         };
 
         const ownerId = fieldValue('customer_id');
@@ -266,21 +278,84 @@ function Extension() {
     loadSubscriptions();
   }, [loadCards, loadSubscriptions]);
 
+  const loadVariantDetails = useCallback(async (variantIds) => {
+    if (!variantIds || variantIds.length === 0) return;
+
+    const uniqueIds = [...new Set(variantIds)];
+    const query = {
+      query: `
+        query GetVariantDetails($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on ProductVariant {
+              id
+              title
+              product {
+                title
+              }
+              price {
+                amount
+                currencyCode
+              }
+            }
+          }
+        }
+      `,
+      variables: { ids: uniqueIds },
+    };
+
+    try {
+      const response = await fetch(
+        `shopify://storefront/api/${API_VERSION}/graphql.json`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(query),
+        },
+      );
+      const { data } = await response.json();
+      const nodes = data?.nodes || [];
+      const details = {};
+      nodes.forEach((node) => {
+        if (node?.id) {
+          const productTitle = node.product?.title || '';
+          const variantTitle = node.title === 'Default Title' ? '' : node.title;
+          const displayTitle = variantTitle ? `${productTitle} - ${variantTitle}` : productTitle || node.id;
+          const price = node.price
+            ? `${node.price.currencyCode} ${parseFloat(node.price.amount).toFixed(2)}`
+            : '';
+          details[node.id] = { displayTitle, price };
+        }
+      });
+      setVariantDetails((prev) => ({ ...prev, ...details }));
+    } catch (err) {
+      console.error('Failed to load variant details:', err);
+    }
+  }, [API_VERSION]);
+
+  useEffect(() => {
+    if (!subscriptions || subscriptions.length === 0) return;
+    const variantIds = subscriptions.flatMap((s) =>
+      (s.items || []).map((i) => i.variant_id).filter(Boolean),
+    );
+    loadVariantDetails(variantIds);
+  }, [subscriptions, loadVariantDetails]);
+
   const handleDeleteSubscription = useCallback(async (subscriptionId) => {
     // TODO: point this to your backend endpoint that deletes
     // the subscription_order metaobject and any related data.
-    const url = 'https://3348-184-148-133-49.ngrok-free.app/delete-subscription-order';
+    const url = 'https://3348-184-148-133-49.ngrok-free.app/api/subscription/delete';
 
     setDeletingSubscriptionId(subscriptionId);
     setSubscriptionsError('');
 
     try {
+      const customerGid = await fetchCustomerId();
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({subscriptionId}),
+        body: JSON.stringify({subscriptionId, customerGid}),
       });
 
       if (!response.ok) {
@@ -296,6 +371,81 @@ function Extension() {
     } finally {
       setDeletingSubscriptionId('');
     }
+  }, [fetchCustomerId]);
+
+  const handleSaveSubscriptionEdits = useCallback(async (subscriptionId) => {
+    const url = 'https://3348-184-148-133-49.ngrok-free.app/api/subscription/update';
+    const items = editingItems[subscriptionId];
+
+    if (items === undefined) return;
+
+    const subscription = (subscriptions || []).find((s) => s.id === subscriptionId);
+    const currency = subscription?.subscriptionLineItems?.currency || 'CAD';
+    const status = editingStatus[subscriptionId] ?? subscription?.status ?? 'active';
+
+    const subscription_line_items = {
+      currency,
+      items,
+    };
+
+    setSavingSubscriptionId(subscriptionId);
+    setSubscriptionsError('');
+
+    try {
+      const customerGid = await fetchCustomerId();
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({subscriptionId, customerGid, subscription_line_items, status}),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save subscription');
+      }
+
+      setExpandedSubscriptions((current) =>
+        current.filter((id) => id !== subscriptionId),
+      );
+      setEditingItems((prev) => {
+        const next = { ...prev };
+        delete next[subscriptionId];
+        return next;
+      });
+      setEditingStatus((prev) => {
+        const next = { ...prev };
+        delete next[subscriptionId];
+        return next;
+      });
+      loadSubscriptions();
+    } catch (err) {
+      console.error(err);
+      setSubscriptionsError('Unable to save changes right now.');
+    } finally {
+      setSavingSubscriptionId('');
+    }
+  }, [editingItems, editingStatus, fetchCustomerId, loadSubscriptions, subscriptions]);
+
+  const removeLineItem = useCallback((subscriptionId, index) => {
+    setEditingItems((prev) => {
+      const current = prev[subscriptionId] || [];
+      const next = current.filter((_, i) => i !== index);
+      return { ...prev, [subscriptionId]: next };
+    });
+  }, []);
+
+  const updateLineItemQuantity = useCallback((subscriptionId, index, delta) => {
+    setEditingItems((prev) => {
+      const current = prev[subscriptionId] || [];
+      const next = current.map((item, i) => {
+        if (i !== index) return item;
+        const qty = Math.max(0, (item.quantity || 1) + delta);
+        if (qty === 0) return null;
+        return { ...item, quantity: qty };
+      }).filter(Boolean);
+      return { ...prev, [subscriptionId]: next };
+    });
   }, []);
 
   return (
@@ -346,14 +496,18 @@ function Extension() {
                         </s-text>
                         {deletingCardId === card.id ? (
                           <s-text>Removing…</s-text>
+                        ) : confirmingCardId === card.id ? (
+                          <s-stack direction="inline" gap="base">
+                            <s-text>Remove this card?</s-text>
+                            <s-link onClick={() => { handleDeleteCard(card.id); setConfirmingCardId(null); }}>
+                              Yes
+                            </s-link>
+                            <s-link onClick={() => setConfirmingCardId(null)}>
+                              Cancel
+                            </s-link>
+                          </s-stack>
                         ) : (
-                          <s-link
-                            onClick={() => {
-                              if (window.confirm('Remove this card?')) {
-                                handleDeleteCard(card.id, card.token);
-                              }
-                            }}
-                          >
+                          <s-link onClick={() => setConfirmingCardId(card.id)}>
                             Remove
                           </s-link>
                         )}
@@ -423,11 +577,33 @@ function Extension() {
                           )}
                           <s-link
                             onClick={() => {
-                              setExpandedSubscriptions((current) =>
-                                current.includes(subscription.id)
-                                  ? current.filter((id) => id !== subscription.id)
-                                  : [...current, subscription.id],
-                              );
+                              if (isExpanded) {
+                                setExpandedSubscriptions((current) =>
+                                  current.filter((id) => id !== subscription.id),
+                                );
+                                setEditingItems((prev) => {
+                                  const next = { ...prev };
+                                  delete next[subscription.id];
+                                  return next;
+                                });
+                                setEditingStatus((prev) => {
+                                  const next = { ...prev };
+                                  delete next[subscription.id];
+                                  return next;
+                                });
+                              } else {
+                                setExpandedSubscriptions((current) =>
+                                  [...current, subscription.id],
+                                );
+                                setEditingItems((prev) => ({
+                                  ...prev,
+                                  [subscription.id]: (subscription.items || []).map((i) => ({ ...i, quantity: i.quantity ?? 1 })),
+                                }));
+                                setEditingStatus((prev) => ({
+                                  ...prev,
+                                  [subscription.id]: (subscription.status || 'active').toLowerCase(),
+                                }));
+                              }
                             }}
                           >
                             {isExpanded ? 'Done' : 'Edit'}
@@ -436,21 +612,60 @@ function Extension() {
 
                         {isExpanded && (
                           <s-stack gap="small">
-                            {subscription.items && subscription.items.length > 0 && (
+                            <s-stack direction="inline" gap="base">
+                              <s-text>
+                                Status: {(editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase()}
+                              </s-text>
+                              <s-link
+                                onClick={() => {
+                                  const current = (editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase();
+                                  const next = current === 'active' ? 'pause' : 'active';
+                                  setEditingStatus((prev) => ({ ...prev, [subscription.id]: next }));
+                                }}
+                              >
+                                Switch to {(editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase() === 'active' ? 'Pause' : 'Active'}
+                              </s-link>
+                            </s-stack>
+                            <s-text>Line items</s-text>
+                            {(editingItems[subscription.id] || subscription.items || []).length > 0 ? (
                               <s-stack gap="small">
-                                {subscription.items.map((item) => (
-                                  <s-box key={item.id || item.sku}>
-                                    <s-text>
-                                      {item.name} {item.quantity ? `× ${item.quantity}` : ''}
-                                    </s-text>
-                                    {item.price && (
-                                      <s-text>
-                                        {item.price}
-                                      </s-text>
-                                    )}
+                                {(editingItems[subscription.id] ?? subscription.items ?? []).map((item, index) => {
+                                  const details = variantDetails[item.variant_id];
+                                  const displayTitle = details?.displayTitle || item.name || item.variant_id || 'Item';
+                                  const displayPrice = details?.price || item.price;
+                                  return (
+                                  <s-box key={item.variant_id || index}>
+                                    <s-stack direction="inline" gap="base">
+                                      <s-stack gap="small">
+                                        <s-text>
+                                          {displayTitle}
+                                        </s-text>
+                                        <s-stack direction="inline" gap="base">
+                                          <s-link onClick={() => updateLineItemQuantity(subscription.id, index, -1)}>
+                                            −
+                                          </s-link>
+                                          <s-text>
+                                            {item.quantity ?? 1}
+                                          </s-text>
+                                          <s-link onClick={() => updateLineItemQuantity(subscription.id, index, 1)}>
+                                            +
+                                          </s-link>
+                                        </s-stack>
+                                        {displayPrice && (
+                                          <s-text>
+                                            {displayPrice}
+                                          </s-text>
+                                        )}
+                                      </s-stack>
+                                      <s-link onClick={() => removeLineItem(subscription.id, index)}>
+                                        Remove
+                                      </s-link>
+                                    </s-stack>
                                   </s-box>
-                                ))}
+                                );})}
                               </s-stack>
+                            ) : (
+                              <s-text>No line items</s-text>
                             )}
 
                             {subscription.createdAt && (
@@ -459,16 +674,48 @@ function Extension() {
                               </s-text>
                             )}
                             <s-stack direction="inline" gap="base">
+                              {savingSubscriptionId === subscription.id ? (
+                                <s-text>Saving…</s-text>
+                              ) : (
+                                <s-link onClick={() => handleSaveSubscriptionEdits(subscription.id)}>
+                                  Save
+                                </s-link>
+                              )}
+                              <s-link
+                                onClick={() => {
+                                  setExpandedSubscriptions((current) =>
+                                    current.filter((id) => id !== subscription.id),
+                                  );
+                                  setEditingItems((prev) => {
+                                    const next = { ...prev };
+                                    delete next[subscription.id];
+                                    return next;
+                                  });
+                                  setEditingStatus((prev) => {
+                                    const next = { ...prev };
+                                    delete next[subscription.id];
+                                    return next;
+                                  });
+                                }}
+                              >
+                                Disregard
+                              </s-link>
+                            </s-stack>
+                            <s-stack direction="inline" gap="base">
                               {deletingSubscriptionId === subscription.id ? (
                                 <s-text>Deleting…</s-text>
+                              ) : confirmingSubscriptionId === subscription.id ? (
+                                <s-stack direction="inline" gap="base">
+                                  <s-text>Delete this subscription?</s-text>
+                                  <s-link onClick={() => { handleDeleteSubscription(subscription.id); setConfirmingSubscriptionId(null); }}>
+                                    Yes
+                                  </s-link>
+                                  <s-link onClick={() => setConfirmingSubscriptionId(null)}>
+                                    Cancel
+                                  </s-link>
+                                </s-stack>
                               ) : (
-                                <s-link
-                                  onClick={() => {
-                                    if (window.confirm('Delete this subscription?')) {
-                                      handleDeleteSubscription(subscription.id);
-                                    }
-                                  }}
-                                >
+                                <s-link onClick={() => setConfirmingSubscriptionId(subscription.id)}>
                                   Delete
                                 </s-link>
                               )}
