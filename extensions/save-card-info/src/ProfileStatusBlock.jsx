@@ -489,13 +489,13 @@ function Extension() {
   }, []);
 
   return (
-    <s-stack gap="base">
+    <s-stack gap="small">
       {/* Moneris cards section */}
       <s-section>
-        <s-box padding="base" border="base" borderRadius="large">
+        <s-box padding="base" border="none" borderRadius="large">
           <s-stack gap="base">
             <s-stack direction="inline" gap="base">
-              <s-text>Moneris payment methods</s-text>
+              <s-heading>Moneris payment methods</s-heading>
               <s-link onClick={handleSaveCard}>
                 + Add
               </s-link>
@@ -526,7 +526,7 @@ function Extension() {
                   </s-text>
                   <s-stack direction="inline" gap="base">
                     {cards.map((card) => (
-                      <s-box key={card.id} padding="small" border="base" borderRadius="large">
+                      <s-box key={card.id} padding="small" border="none" borderRadius="large">
                         <s-stack gap="small">
                           <s-text>
                             ending in {card.last4}
@@ -570,7 +570,7 @@ function Extension() {
 
       {/* Subscriptions section */}
       <s-section heading="Subscriptions">
-        <s-box padding="base" border="base" borderRadius="large">
+        <s-box padding="base" border="none" borderRadius="large">
           <s-stack gap="base">
             <s-text type="small">
               Manage your recurring orders and billing.
@@ -598,7 +598,7 @@ function Extension() {
                     <s-box
                       key={subscription.id}
                       padding="small"
-                      border="base"
+                      border="none"
                       borderRadius="large"
                     >
                       <s-stack gap="small">
@@ -669,7 +669,7 @@ function Extension() {
                         </s-stack>
 
                         {isExpanded && (
-                          <s-box padding="small" border="base" borderRadius="large">
+                          <s-box padding="small" border="none" borderRadius="large">
                             <s-stack gap="base">
                               <s-select
                                 label="Status"
@@ -732,7 +732,7 @@ function Extension() {
                                       const displayTitle = details?.displayTitle || item.name || item.variant_id || 'Item';
                                       const displayPrice = details?.price || item.price;
                                       return (
-                                        <s-box key={item.variant_id || index} padding="base" border="base" borderRadius="large">
+                                        <s-box key={item.variant_id || index} padding="base" border="none" borderRadius="large">
                                           <s-stack direction="inline" gap="base">
                                             <s-stack gap="small">
                                               <s-text>
