@@ -22,6 +22,7 @@ function Extension() {
   const [confirmingSubscriptionId, setConfirmingSubscriptionId] = useState(null);
   const [editingItems, setEditingItems] = useState({});
   const [editingStatus, setEditingStatus] = useState({});
+  const [editingFrequency, setEditingFrequency] = useState({});
   const [savingSubscriptionId, setSavingSubscriptionId] = useState('');
   const [variantDetails, setVariantDetails] = useState({});
 
@@ -246,6 +247,11 @@ function Extension() {
           // ignore JSON parse errors and leave items empty
         }
 
+        const rawFreqNum = fieldValue('frequency_number');
+        const frequencyNumber = rawFreqNum ? Math.max(1, parseInt(rawFreqNum, 10) || 1) : 1;
+        const rawFreqUnit = (fieldValue('frequency_unit') || 'week').toLowerCase();
+        const frequencyUnit = ['day', 'week', 'month'].includes(rawFreqUnit) ? rawFreqUnit : 'week';
+
         const result = {
           id: node.id,
           status: fieldValue('status'),
@@ -253,6 +259,8 @@ function Extension() {
           createdAt: fieldValue('last_billed_at'),
           subscriptionLineItems,
           items: subscriptionLineItems.items,
+          frequencyNumber,
+          frequencyUnit,
         };
 
         const ownerId = fieldValue('customer_id');
@@ -382,6 +390,9 @@ function Extension() {
     const subscription = (subscriptions || []).find((s) => s.id === subscriptionId);
     const currency = subscription?.subscriptionLineItems?.currency || 'CAD';
     const status = editingStatus[subscriptionId] ?? subscription?.status ?? 'active';
+    const freq = editingFrequency[subscriptionId] ?? { number: subscription?.frequencyNumber ?? 1, unit: subscription?.frequencyUnit ?? 'week' };
+    const frequency_number = Math.max(1, parseInt(freq.number, 10) || 1);
+    const frequency_unit = ['day', 'week', 'month'].includes(String(freq.unit).toLowerCase()) ? String(freq.unit).toLowerCase() : 'week';
 
     const subscription_line_items = {
       currency,
@@ -398,7 +409,14 @@ function Extension() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({subscriptionId, customerGid, subscription_line_items, status}),
+        body: JSON.stringify({
+          subscriptionId,
+          customerGid,
+          subscription_line_items,
+          status,
+          frequency_number,
+          frequency_unit,
+        }),
       });
 
       if (!response.ok) {
@@ -416,6 +434,8 @@ function Extension() {
             status: savedStatus,
             subscriptionLineItems: { currency, items },
             items,
+            frequencyNumber: frequency_number,
+            frequencyUnit: frequency_unit,
           };
         });
       });
@@ -433,6 +453,11 @@ function Extension() {
         delete next[subscriptionId];
         return next;
       });
+      setEditingFrequency((prev) => {
+        const next = { ...prev };
+        delete next[subscriptionId];
+        return next;
+      });
       // Don't refetch here: Shopify metaobjects can be delayed, and would overwrite our local update with stale data
     } catch (err) {
       console.error(err);
@@ -440,7 +465,7 @@ function Extension() {
     } finally {
       setSavingSubscriptionId('');
     }
-  }, [editingItems, editingStatus, fetchCustomerId, subscriptions]);
+  }, [editingItems, editingStatus, editingFrequency, fetchCustomerId, subscriptions]);
 
   const removeLineItem = useCallback((subscriptionId, index) => {
     setEditingItems((prev) => {
@@ -466,108 +491,105 @@ function Extension() {
   return (
     <s-stack gap="base">
       {/* Moneris cards section */}
-      <s-box padding="base" border="base" borderRadius="large">
-        <s-stack gap="base">
-          <s-stack direction="inline" gap="base">
-            <s-text>
-              Moneris payment methods
-            </s-text>
-            <s-link onClick={handleSaveCard}>
-              + Add
-            </s-link>
-          </s-stack>
-          <s-banner>
-            <s-text>
-              Save a credit card securely for future purchases.
-              Your card details are entered on Moneris and never stored by us.
-            </s-text>
-          </s-banner>
-
-          {cardsLoading && (
-            <s-text>Loading saved cards…</s-text>
-          )}
-
-          {cardsError && (
+      <s-section>
+        <s-box padding="base" border="base" borderRadius="large">
+          <s-stack gap="base">
+            <s-stack direction="inline" gap="base">
+              <s-text>Moneris payment methods</s-text>
+              <s-link onClick={handleSaveCard}>
+                + Add
+              </s-link>
+            </s-stack>
             <s-banner>
-              <s-text>
-                {cardsError}
+              <s-text type="small">
+                Save a credit card securely for future purchases. Your card details are entered on Moneris and never stored by us.
               </s-text>
             </s-banner>
-          )}
 
-          {cards && !cardsLoading && !cardsError && (
-            cards.length > 0 ? (
-              <s-stack gap="small">
-                <s-text>
-                  Saved cards
-                </s-text>
-                <s-stack direction="inline" gap="base">
-                  {cards.map((card) => (
-                    <s-box key={card.id} padding="small" border="base" borderRadius="large">
-                      <s-stack gap="small">
-                        <s-text>
-                          ending in {card.last4}
-                        </s-text>
-                        <s-text>
-                          Expires {card.expiry}
-                        </s-text>
-                        {deletingCardId === card.id ? (
-                          <s-text>Removing…</s-text>
-                        ) : confirmingCardId === card.id ? (
-                          <s-stack direction="inline" gap="base">
-                            <s-text>Remove this card?</s-text>
-                            <s-link onClick={() => { handleDeleteCard(card.id); setConfirmingCardId(null); }}>
-                              Yes
-                            </s-link>
-                            <s-link onClick={() => setConfirmingCardId(null)}>
-                              Cancel
-                            </s-link>
-                          </s-stack>
-                        ) : (
-                          <s-link onClick={() => setConfirmingCardId(card.id)}>
-                            Remove
-                          </s-link>
-                        )}
-                      </s-stack>
-                    </s-box>
-                  ))}
-                </s-stack>
-              </s-stack>
-            ) : (
+            {cardsLoading && (
+              <s-text type="small">Loading saved cards…</s-text>
+            )}
+
+            {cardsError && (
               <s-banner>
-                <s-text>
-                  You don&apos;t have any saved cards yet.
+                <s-text type="small">
+                  {cardsError}
                 </s-text>
               </s-banner>
-            )
-          )}
-        </s-stack>
-      </s-box>
+            )}
+
+            {cards && !cardsLoading && !cardsError && (
+              cards.length > 0 ? (
+                <s-stack gap="small">
+                  <s-text>
+                    Saved cards
+                  </s-text>
+                  <s-stack direction="inline" gap="base">
+                    {cards.map((card) => (
+                      <s-box key={card.id} padding="small" border="base" borderRadius="large">
+                        <s-stack gap="small">
+                          <s-text>
+                            ending in {card.last4}
+                          </s-text>
+                          <s-text type="small">
+                            Expires {card.expiry}
+                          </s-text>
+                          {deletingCardId === card.id ? (
+                            <s-text type="small">Removing…</s-text>
+                          ) : confirmingCardId === card.id ? (
+                            <s-stack direction="inline" gap="base">
+                              <s-text type="small">Remove this card?</s-text>
+                              <s-link onClick={() => { handleDeleteCard(card.id); setConfirmingCardId(null); }}>
+                                Yes
+                              </s-link>
+                              <s-link onClick={() => setConfirmingCardId(null)}>
+                                Cancel
+                              </s-link>
+                            </s-stack>
+                          ) : (
+                            <s-link onClick={() => setConfirmingCardId(card.id)}>
+                              Remove
+                            </s-link>
+                          )}
+                        </s-stack>
+                      </s-box>
+                    ))}
+                  </s-stack>
+                </s-stack>
+              ) : (
+                <s-banner>
+                  <s-text type="small">
+                    You don&apos;t have any saved cards yet.
+                  </s-text>
+                </s-banner>
+              )
+            )}
+          </s-stack>
+        </s-box>
+      </s-section>
 
       {/* Subscriptions section */}
-      <s-box padding="base" border="base" borderRadius="large">
-        <s-stack gap="base">
-          <s-text>
-            Subscriptions
-          </s-text>
-          <s-text>
-            Manage your recurring orders and billing.
-          </s-text>
-          {subscriptionsLoading && (
-            <s-text>Loading subscriptions…</s-text>
-          )}
+      <s-section heading="Subscriptions">
+        <s-box padding="base" border="base" borderRadius="large">
+          <s-stack gap="base">
+            <s-text type="small">
+              Manage your recurring orders and billing.
+            </s-text>
+            {subscriptionsLoading && (
+              <s-text type="small">Loading subscriptions…</s-text>
+            )}
 
-          {subscriptionsError && (
-            <s-banner>
-              <s-text>
-                {subscriptionsError}
-              </s-text>
-            </s-banner>
-          )}
+            {subscriptionsError && (
+              <s-banner>
+                <s-text type="small">
+                  {subscriptionsError}
+                </s-text>
+              </s-banner>
+            )}
 
-          {subscriptions && !subscriptionsLoading && !subscriptionsError && (
-            subscriptions.length > 0 ? (
-              <s-stack gap="base">
+            {subscriptions && !subscriptionsLoading && !subscriptionsError && (
+              subscriptions.length > 0 ? (
+                <s-stack direction="inline" gap="base">
                 {subscriptions.map((subscription) => {
                   const isExpanded = expandedSubscriptions.includes(subscription.id);
                   const title = subscription.title || subscription.name || 'Subscription';
@@ -575,7 +597,7 @@ function Extension() {
                   return (
                     <s-box
                       key={subscription.id}
-                      padding="base"
+                      padding="small"
                       border="base"
                       borderRadius="large"
                     >
@@ -585,13 +607,18 @@ function Extension() {
                             {title}
                           </s-text>
                           {subscription.status && (
-                            <s-text>
-                              Status: {subscription.status}
-                            </s-text>
+                          <s-text type="small">
+                            Status: {subscription.status}
+                          </s-text>
                           )}
                           {subscription.nextBillingDate && (
-                            <s-text>
+                            <s-text type="small">
                               Next billing: {subscription.nextBillingDate}
+                            </s-text>
+                          )}
+                          {(subscription.frequencyNumber != null && subscription.frequencyUnit) && (
+                            <s-text type="small">
+                              Delivery: every {subscription.frequencyNumber} {subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)'}
                             </s-text>
                           )}
                           <s-link
@@ -610,6 +637,11 @@ function Extension() {
                                   delete next[subscription.id];
                                   return next;
                                 });
+                                setEditingFrequency((prev) => {
+                                  const next = { ...prev };
+                                  delete next[subscription.id];
+                                  return next;
+                                });
                               } else {
                                 setExpandedSubscriptions((current) =>
                                   [...current, subscription.id],
@@ -622,6 +654,13 @@ function Extension() {
                                   ...prev,
                                   [subscription.id]: (subscription.status || 'active').toLowerCase(),
                                 }));
+                                setEditingFrequency((prev) => ({
+                                  ...prev,
+                                  [subscription.id]: {
+                                    number: subscription.frequencyNumber ?? 1,
+                                    unit: subscription.frequencyUnit ?? 'week',
+                                  },
+                                }));
                               }
                             }}
                           >
@@ -630,24 +669,58 @@ function Extension() {
                         </s-stack>
 
                         {isExpanded && (
-                          <s-box padding="base" border="base" borderRadius="large">
-                            <s-stack gap="large">
+                          <s-box padding="small" border="base" borderRadius="large">
+                            <s-stack gap="base">
+                              <s-select
+                                label="Status"
+                                value={(editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase()}
+                                onChange={(/** @type {any} */ e) => {
+                                  const value = e?.currentTarget && e.currentTarget.value ? String(e.currentTarget.value) : 'active';
+                                  const normalized = value === 'pause' ? 'pause' : 'active';
+                                  setEditingStatus((prev) => ({ ...prev, [subscription.id]: normalized }));
+                                }}
+                              >
+                                <s-option value="active">Active</s-option>
+                                <s-option value="pause">Pause</s-option>
+                              </s-select>
+
                               <s-stack gap="small">
-                                <s-text>Status</s-text>
-                                <s-stack direction="inline" gap="base">
-                                  <s-text>
-                                    {(editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase()}
-                                  </s-text>
-                                  <s-link
-                                    onClick={() => {
-                                      const current = (editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase();
-                                      const next = current === 'active' ? 'pause' : 'active';
-                                      setEditingStatus((prev) => ({ ...prev, [subscription.id]: next }));
-                                    }}
-                                  >
-                                    {(editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase() === 'active' ? 'Pause subscription' : 'Resume subscription'}
-                                  </s-link>
-                                </s-stack>
+                                {/* @ts-ignore s-number-field value is string-based in runtime */}
+                                <s-number-field
+                                  name={`frequency-number-${subscription.id}`}
+                                  label="Delivery frequency"
+                                  min={1}
+                                  value={String((editingFrequency[subscription.id] ?? { number: subscription.frequencyNumber ?? 1 }).number)}
+                                  onChange={(/** @type {any} */ e) => {
+                                    const raw = e?.target && e.target.value ? String(e.target.value) : '';
+                                    setEditingFrequency((prev) => ({
+                                      ...prev,
+                                      [subscription.id]: {
+                                        ...(prev[subscription.id] ?? { number: 1, unit: 'week' }),
+                                        number: raw,
+                                      },
+                                    }));
+                                  }}
+                                />
+                                <s-select
+                                  label="Frequency unit"
+                                  value={(editingFrequency[subscription.id] ?? { unit: subscription.frequencyUnit ?? 'week' }).unit}
+                                  onChange={(/** @type {any} */ e) => {
+                                    const rawUnit = e?.currentTarget && e.currentTarget.value ? String(e.currentTarget.value) : 'week';
+                                    const normalized = ['day', 'week', 'month'].includes(rawUnit) ? rawUnit : 'week';
+                                    setEditingFrequency((prev) => ({
+                                      ...prev,
+                                      [subscription.id]: {
+                                        ...(prev[subscription.id] ?? { number: 1, unit: 'week' }),
+                                        unit: normalized,
+                                      },
+                                    }));
+                                  }}
+                                >
+                                  <s-option value="day">Day(s)</s-option>
+                                  <s-option value="week">Week(s)</s-option>
+                                  <s-option value="month">Month(s)</s-option>
+                                </s-select>
                               </s-stack>
 
                               <s-stack gap="base">
@@ -696,61 +769,66 @@ function Extension() {
                               </s-stack>
 
                               {subscription.createdAt && (
-                                <s-text>
+                                <s-text type="small">
                                   Started on: {subscription.createdAt}
                                 </s-text>
                               )}
 
-                              <s-stack gap="base">
-                                  <s-stack direction="inline" gap="base">
-                                    {savingSubscriptionId === subscription.id ? (
-                                      <s-text>Saving…</s-text>
-                                    ) : (
-                                      <s-link onClick={() => handleSaveSubscriptionEdits(subscription.id)}>
-                                        Save
-                                      </s-link>
-                                    )}
-                                    <s-link
-                                      onClick={() => {
-                                        setExpandedSubscriptions((current) =>
-                                          current.filter((id) => id !== subscription.id),
-                                        );
-                                        setEditingItems((prev) => {
-                                          const next = { ...prev };
-                                          delete next[subscription.id];
-                                          return next;
-                                        });
-                                        setEditingStatus((prev) => {
-                                          const next = { ...prev };
-                                          delete next[subscription.id];
-                                          return next;
-                                        });
-                                      }}
-                                    >
-                                      Disregard
+                              <s-stack gap="small">
+                                <s-stack direction="inline" gap="base">
+                                  {savingSubscriptionId === subscription.id ? (
+                                    <s-text type="small">Saving…</s-text>
+                                  ) : (
+                                    <s-link onClick={() => handleSaveSubscriptionEdits(subscription.id)}>
+                                      Save
                                     </s-link>
-                                  </s-stack>
-                                  <s-stack direction="inline" gap="base">
-                                    {deletingSubscriptionId === subscription.id ? (
-                                      <s-text>Deleting…</s-text>
-                                    ) : confirmingSubscriptionId === subscription.id ? (
-                                      <s-stack direction="inline" gap="base">
-                                        <s-text>Delete this subscription?</s-text>
-                                        <s-link onClick={() => { handleDeleteSubscription(subscription.id); setConfirmingSubscriptionId(null); }}>
-                                          Yes
-                                        </s-link>
-                                        <s-link onClick={() => setConfirmingSubscriptionId(null)}>
-                                          Cancel
-                                        </s-link>
-                                      </s-stack>
-                                    ) : (
-                                      <s-link onClick={() => setConfirmingSubscriptionId(subscription.id)}>
-                                        Delete subscription
+                                  )}
+                                  <s-link
+                                    onClick={() => {
+                                      setExpandedSubscriptions((current) =>
+                                        current.filter((id) => id !== subscription.id),
+                                      );
+                                      setEditingItems((prev) => {
+                                        const next = { ...prev };
+                                        delete next[subscription.id];
+                                        return next;
+                                      });
+                                      setEditingStatus((prev) => {
+                                        const next = { ...prev };
+                                        delete next[subscription.id];
+                                        return next;
+                                      });
+                                      setEditingFrequency((prev) => {
+                                        const next = { ...prev };
+                                        delete next[subscription.id];
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    Disregard
+                                  </s-link>
+                                </s-stack>
+                                <s-stack direction="inline" gap="base">
+                                  {deletingSubscriptionId === subscription.id ? (
+                                    <s-text type="small">Deleting…</s-text>
+                                  ) : confirmingSubscriptionId === subscription.id ? (
+                                    <s-stack direction="inline" gap="base">
+                                      <s-text type="small">Delete this subscription?</s-text>
+                                      <s-link onClick={() => { handleDeleteSubscription(subscription.id); setConfirmingSubscriptionId(null); }}>
+                                        Yes
                                       </s-link>
-                                    )}
-                                  </s-stack>
+                                      <s-link onClick={() => setConfirmingSubscriptionId(null)}>
+                                        Cancel
+                                      </s-link>
+                                    </s-stack>
+                                  ) : (
+                                    <s-link onClick={() => setConfirmingSubscriptionId(subscription.id)}>
+                                      Delete subscription
+                                    </s-link>
+                                  )}
                                 </s-stack>
                               </s-stack>
+                            </s-stack>
                           </s-box>
                         )}
                       </s-stack>
@@ -760,14 +838,15 @@ function Extension() {
               </s-stack>
             ) : (
               <s-banner>
-                <s-text>
+                <s-text type="small">
                   You don&apos;t have any active subscriptions yet.
                 </s-text>
               </s-banner>
             )
           )}
-        </s-stack>
-      </s-box>
+          </s-stack>
+        </s-box>
+      </s-section>
     </s-stack>
   );
 }
