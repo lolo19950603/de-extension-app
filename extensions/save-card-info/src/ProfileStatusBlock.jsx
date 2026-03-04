@@ -1,6 +1,6 @@
 import '@shopify/ui-extensions/preact';
 import {render} from 'preact';
-import {useCallback, useEffect, useState} from 'preact/hooks';
+import {useCallback, useEffect, useRef, useState} from 'preact/hooks';
 
 
 
@@ -25,6 +25,13 @@ function Extension() {
   const [editingFrequency, setEditingFrequency] = useState({});
   const [savingSubscriptionId, setSavingSubscriptionId] = useState('');
   const [variantDetails, setVariantDetails] = useState({});
+  const [editingSubscriptionId, setEditingSubscriptionId] = useState(null);
+  const editModalRef = useRef(null);
+  const editModalCloseButtonRef = useRef(null);
+  const removeCardModalCloseButtonRef = useRef(null);
+  const removeCardModalRef = useRef(null);
+  const pendingDeleteSubscriptionIdRef = useRef(null);
+  const pendingDeleteCardIdRef = useRef(null);
 
   const API_VERSION = '2026-01';
   const getCustomerIdQuery = {
@@ -488,85 +495,161 @@ function Extension() {
     });
   }, []);
 
+  const openEditModal = useCallback((subscription) => {
+    setEditingSubscriptionId(subscription.id);
+    setEditingItems((prev) => ({
+      ...prev,
+      [subscription.id]: (subscription.items || []).map((i) => ({ ...i, quantity: i.quantity ?? 1 })),
+    }));
+    setEditingStatus((prev) => ({
+      ...prev,
+      [subscription.id]: (subscription.status || 'active').toLowerCase(),
+    }));
+    setEditingFrequency((prev) => ({
+      ...prev,
+      [subscription.id]: {
+        number: subscription.frequencyNumber ?? 1,
+        unit: subscription.frequencyUnit ?? 'week',
+      },
+    }));
+  }, []);
+
+  const closeEditModal = useCallback(() => {
+    const pendingSubId = pendingDeleteSubscriptionIdRef.current;
+    if (pendingSubId) {
+      pendingDeleteSubscriptionIdRef.current = null;
+      handleDeleteSubscription(pendingSubId);
+    }
+    const id = editingSubscriptionId;
+    setEditingSubscriptionId(null);
+    if (id) {
+      setEditingItems((prev) => { const next = { ...prev }; delete next[id]; return next; });
+      setEditingStatus((prev) => { const next = { ...prev }; delete next[id]; return next; });
+      setEditingFrequency((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    }
+    setConfirmingSubscriptionId(null);
+  }, [editingSubscriptionId, handleDeleteSubscription]);
+
+  const closeEditModalAndHide = useCallback(() => {
+    editModalRef.current?.hideOverlay?.();
+  }, []);
+
   return (
     <s-stack gap="small">
       {/* Moneris cards section */}
+      <s-button
+        variant="secondary"  // or "tertiary" depending on your design
+        tone="critical"
+      >
+        Delete
+      </s-button>
       <s-section>
-        <s-box padding="base" border="none" borderRadius="large">
-          <s-stack gap="base">
-            <s-stack direction="inline" gap="base">
-              <s-heading>Moneris payment methods</s-heading>
-              <s-link onClick={handleSaveCard}>
-                + Add
-              </s-link>
-            </s-stack>
+        <s-stack gap="base">
+          <s-stack direction="inline" gap="base">
+            <s-heading>Moneris payment methods</s-heading>
+            <s-link onClick={handleSaveCard}>
+              + Add
+            </s-link>
+          </s-stack>
+          <s-banner>
+            <s-text type="small">
+              Save a credit card securely for future purchases. Your card details are entered on Moneris and never stored by us.
+            </s-text>
+          </s-banner>
+
+          {cardsLoading && (
+            <s-text type="small">Loading saved cards…</s-text>
+          )}
+
+          {cardsError && (
             <s-banner>
               <s-text type="small">
-                Save a credit card securely for future purchases. Your card details are entered on Moneris and never stored by us.
+                {cardsError}
               </s-text>
             </s-banner>
+          )}
 
-            {cardsLoading && (
-              <s-text type="small">Loading saved cards…</s-text>
-            )}
-
-            {cardsError && (
+          {cards && !cardsLoading && !cardsError && (
+            cards.length > 0 ? (
+              <s-stack gap="small">
+                <s-stack direction="inline" gap="base">
+                  {cards.map((card) => (
+                    <s-box key={card.id} padding="small" border="none" borderRadius="large">
+                      <s-stack gap="small">
+                        <s-text>Card</s-text>
+                        <s-text>
+                          Ending in: {card.last4}
+                        </s-text>
+                        <s-text type="small">
+                          Expires: {card.expiry}
+                        </s-text>
+                        {deletingCardId === card.id ? (
+                          <s-text type="small">Removing…</s-text>
+                        ) : (
+                          <s-link
+                            commandFor="remove-card-modal"
+                            command="--show"
+                            onClick={() => setConfirmingCardId(card.id)}
+                          >
+                            <s-text tone="critical">Delete</s-text>
+                          </s-link>
+                        )}
+                      </s-stack>
+                    </s-box>
+                  ))}
+                </s-stack>
+              </s-stack>
+            ) : (
               <s-banner>
                 <s-text type="small">
-                  {cardsError}
+                  You don&apos;t have any saved cards yet.
                 </s-text>
               </s-banner>
-            )}
-
-            {cards && !cardsLoading && !cardsError && (
-              cards.length > 0 ? (
-                <s-stack gap="small">
-                  <s-text>
-                    Saved cards
-                  </s-text>
-                  <s-stack direction="inline" gap="base">
-                    {cards.map((card) => (
-                      <s-box key={card.id} padding="small" border="none" borderRadius="large">
-                        <s-stack gap="small">
-                          <s-text>
-                            ending in {card.last4}
-                          </s-text>
-                          <s-text type="small">
-                            Expires {card.expiry}
-                          </s-text>
-                          {deletingCardId === card.id ? (
-                            <s-text type="small">Removing…</s-text>
-                          ) : confirmingCardId === card.id ? (
-                            <s-stack direction="inline" gap="base">
-                              <s-text type="small">Remove this card?</s-text>
-                              <s-link onClick={() => { handleDeleteCard(card.id); setConfirmingCardId(null); }}>
-                                Yes
-                              </s-link>
-                              <s-link onClick={() => setConfirmingCardId(null)}>
-                                Cancel
-                              </s-link>
-                            </s-stack>
-                          ) : (
-                            <s-link onClick={() => setConfirmingCardId(card.id)}>
-                              Remove
-                            </s-link>
-                          )}
-                        </s-stack>
-                      </s-box>
-                    ))}
-                  </s-stack>
-                </s-stack>
-              ) : (
-                <s-banner>
-                  <s-text type="small">
-                    You don&apos;t have any saved cards yet.
-                  </s-text>
-                </s-banner>
-              )
-            )}
-          </s-stack>
-        </s-box>
+            )
+          )}
+        </s-stack>
       </s-section>
+
+      {/* Remove card confirmation modal */}
+      <s-modal
+        ref={removeCardModalRef}
+        id="remove-card-modal"
+        heading="Remove card"
+        accessibilityLabel="Remove card confirmation"
+        onHide={() => {
+          const pendingId = pendingDeleteCardIdRef.current;
+          if (pendingId) {
+            pendingDeleteCardIdRef.current = null;
+            handleDeleteCard(pendingId);
+          }
+          setConfirmingCardId(null);
+        }}
+      >
+        <s-text>
+          Are you sure you want to remove this card?
+        </s-text>
+        <s-button
+          slot="primary-action"
+          variant="primary"
+          loading={confirmingCardId != null && deletingCardId === confirmingCardId}
+          onClick={() => {
+            if (!confirmingCardId) return;
+            pendingDeleteCardIdRef.current = confirmingCardId;
+            removeCardModalRef.current?.hideOverlay?.();
+          }}
+        >
+          Yes
+        </s-button>
+        <s-button
+          ref={removeCardModalCloseButtonRef}
+          slot="secondary-actions"
+          variant="secondary"
+          commandFor="remove-card-modal"
+          command="--hide"
+        >
+          Cancel
+        </s-button>
+      </s-modal>
 
       {/* Subscriptions section */}
       <s-section heading="Subscriptions">
@@ -591,7 +674,6 @@ function Extension() {
               subscriptions.length > 0 ? (
                 <s-stack direction="inline" gap="base">
                 {subscriptions.map((subscription) => {
-                  const isExpanded = expandedSubscriptions.includes(subscription.id);
                   const title = subscription.title || subscription.name || 'Subscription';
 
                   return (
@@ -602,235 +684,32 @@ function Extension() {
                       borderRadius="large"
                     >
                       <s-stack gap="small">
-                        <s-stack gap="small">
-                          <s-text>
-                            {title}
-                          </s-text>
-                          {subscription.status && (
+                        <s-text>
+                          {title}
+                        </s-text>
+                        {subscription.status && (
                           <s-text type="small">
                             Status: {subscription.status}
                           </s-text>
-                          )}
-                          {subscription.nextBillingDate && (
-                            <s-text type="small">
-                              Next billing: {subscription.nextBillingDate}
-                            </s-text>
-                          )}
-                          {(subscription.frequencyNumber != null && subscription.frequencyUnit) && (
-                            <s-text type="small">
-                              Delivery: every {subscription.frequencyNumber} {subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)'}
-                            </s-text>
-                          )}
-                          <s-link
-                            onClick={() => {
-                              if (isExpanded) {
-                                setExpandedSubscriptions((current) =>
-                                  current.filter((id) => id !== subscription.id),
-                                );
-                                setEditingItems((prev) => {
-                                  const next = { ...prev };
-                                  delete next[subscription.id];
-                                  return next;
-                                });
-                                setEditingStatus((prev) => {
-                                  const next = { ...prev };
-                                  delete next[subscription.id];
-                                  return next;
-                                });
-                                setEditingFrequency((prev) => {
-                                  const next = { ...prev };
-                                  delete next[subscription.id];
-                                  return next;
-                                });
-                              } else {
-                                setExpandedSubscriptions((current) =>
-                                  [...current, subscription.id],
-                                );
-                                setEditingItems((prev) => ({
-                                  ...prev,
-                                  [subscription.id]: (subscription.items || []).map((i) => ({ ...i, quantity: i.quantity ?? 1 })),
-                                }));
-                                setEditingStatus((prev) => ({
-                                  ...prev,
-                                  [subscription.id]: (subscription.status || 'active').toLowerCase(),
-                                }));
-                                setEditingFrequency((prev) => ({
-                                  ...prev,
-                                  [subscription.id]: {
-                                    number: subscription.frequencyNumber ?? 1,
-                                    unit: subscription.frequencyUnit ?? 'week',
-                                  },
-                                }));
-                              }
-                            }}
-                          >
-                            {isExpanded ? 'Done' : 'Edit'}
-                          </s-link>
-                        </s-stack>
-
-                        {isExpanded && (
-                          <s-box padding="small" border="none" borderRadius="large">
-                            <s-stack gap="base">
-                              <s-select
-                                label="Status"
-                                value={(editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase()}
-                                onChange={(/** @type {any} */ e) => {
-                                  const value = e?.currentTarget && e.currentTarget.value ? String(e.currentTarget.value) : 'active';
-                                  const normalized = value === 'pause' ? 'pause' : 'active';
-                                  setEditingStatus((prev) => ({ ...prev, [subscription.id]: normalized }));
-                                }}
-                              >
-                                <s-option value="active">Active</s-option>
-                                <s-option value="pause">Pause</s-option>
-                              </s-select>
-
-                              <s-stack gap="small">
-                                {/* @ts-ignore s-number-field value is string-based in runtime */}
-                                <s-number-field
-                                  name={`frequency-number-${subscription.id}`}
-                                  label="Delivery frequency"
-                                  min={1}
-                                  value={String((editingFrequency[subscription.id] ?? { number: subscription.frequencyNumber ?? 1 }).number)}
-                                  onChange={(/** @type {any} */ e) => {
-                                    const raw = e?.target && e.target.value ? String(e.target.value) : '';
-                                    setEditingFrequency((prev) => ({
-                                      ...prev,
-                                      [subscription.id]: {
-                                        ...(prev[subscription.id] ?? { number: 1, unit: 'week' }),
-                                        number: raw,
-                                      },
-                                    }));
-                                  }}
-                                />
-                                <s-select
-                                  label="Frequency unit"
-                                  value={(editingFrequency[subscription.id] ?? { unit: subscription.frequencyUnit ?? 'week' }).unit}
-                                  onChange={(/** @type {any} */ e) => {
-                                    const rawUnit = e?.currentTarget && e.currentTarget.value ? String(e.currentTarget.value) : 'week';
-                                    const normalized = ['day', 'week', 'month'].includes(rawUnit) ? rawUnit : 'week';
-                                    setEditingFrequency((prev) => ({
-                                      ...prev,
-                                      [subscription.id]: {
-                                        ...(prev[subscription.id] ?? { number: 1, unit: 'week' }),
-                                        unit: normalized,
-                                      },
-                                    }));
-                                  }}
-                                >
-                                  <s-option value="day">Day(s)</s-option>
-                                  <s-option value="week">Week(s)</s-option>
-                                  <s-option value="month">Month(s)</s-option>
-                                </s-select>
-                              </s-stack>
-
-                              <s-stack gap="base">
-                                <s-text>Items in this subscription</s-text>
-                                {(editingItems[subscription.id] || subscription.items || []).length > 0 ? (
-                                  <s-stack gap="base">
-                                    {(editingItems[subscription.id] ?? subscription.items ?? []).map((item, index) => {
-                                      const details = variantDetails[item.variant_id];
-                                      const displayTitle = details?.displayTitle || item.name || item.variant_id || 'Item';
-                                      const displayPrice = details?.price || item.price;
-                                      return (
-                                        <s-box key={item.variant_id || index} padding="base" border="none" borderRadius="large">
-                                          <s-stack direction="inline" gap="base">
-                                            <s-stack gap="small">
-                                              <s-text>
-                                                {displayTitle}
-                                              </s-text>
-                                              {displayPrice && (
-                                                <s-text>
-                                                  {displayPrice}
-                                                </s-text>
-                                              )}
-                                              <s-stack direction="inline" gap="base">
-                                                <s-link onClick={() => updateLineItemQuantity(subscription.id, index, -1)}>
-                                                  −
-                                                </s-link>
-                                                <s-text>
-                                                  {item.quantity ?? 1}
-                                                </s-text>
-                                                <s-link onClick={() => updateLineItemQuantity(subscription.id, index, 1)}>
-                                                  +
-                                                </s-link>
-                                                <s-link onClick={() => removeLineItem(subscription.id, index)}>
-                                                  Remove
-                                                </s-link>
-                                              </s-stack>
-                                            </s-stack>
-                                          </s-stack>
-                                        </s-box>
-                                      );
-                                    })}
-                                  </s-stack>
-                                ) : (
-                                  <s-text>No items in this subscription.</s-text>
-                                )}
-                              </s-stack>
-
-                              {subscription.createdAt && (
-                                <s-text type="small">
-                                  Started on: {subscription.createdAt}
-                                </s-text>
-                              )}
-
-                              <s-stack gap="small">
-                                <s-stack direction="inline" gap="base">
-                                  {savingSubscriptionId === subscription.id ? (
-                                    <s-text type="small">Saving…</s-text>
-                                  ) : (
-                                    <s-link onClick={() => handleSaveSubscriptionEdits(subscription.id)}>
-                                      Save
-                                    </s-link>
-                                  )}
-                                  <s-link
-                                    onClick={() => {
-                                      setExpandedSubscriptions((current) =>
-                                        current.filter((id) => id !== subscription.id),
-                                      );
-                                      setEditingItems((prev) => {
-                                        const next = { ...prev };
-                                        delete next[subscription.id];
-                                        return next;
-                                      });
-                                      setEditingStatus((prev) => {
-                                        const next = { ...prev };
-                                        delete next[subscription.id];
-                                        return next;
-                                      });
-                                      setEditingFrequency((prev) => {
-                                        const next = { ...prev };
-                                        delete next[subscription.id];
-                                        return next;
-                                      });
-                                    }}
-                                  >
-                                    Disregard
-                                  </s-link>
-                                </s-stack>
-                                <s-stack direction="inline" gap="base">
-                                  {deletingSubscriptionId === subscription.id ? (
-                                    <s-text type="small">Deleting…</s-text>
-                                  ) : confirmingSubscriptionId === subscription.id ? (
-                                    <s-stack direction="inline" gap="base">
-                                      <s-text type="small">Delete this subscription?</s-text>
-                                      <s-link onClick={() => { handleDeleteSubscription(subscription.id); setConfirmingSubscriptionId(null); }}>
-                                        Yes
-                                      </s-link>
-                                      <s-link onClick={() => setConfirmingSubscriptionId(null)}>
-                                        Cancel
-                                      </s-link>
-                                    </s-stack>
-                                  ) : (
-                                    <s-link onClick={() => setConfirmingSubscriptionId(subscription.id)}>
-                                      Delete subscription
-                                    </s-link>
-                                  )}
-                                </s-stack>
-                              </s-stack>
-                            </s-stack>
-                          </s-box>
                         )}
+                        {subscription.nextBillingDate && (
+                          <s-text type="small">
+                            Next billing: {subscription.nextBillingDate}
+                          </s-text>
+                        )}
+                        {(subscription.frequencyNumber != null && subscription.frequencyUnit) && (
+                          <s-text type="small">
+                            Delivery: every {subscription.frequencyNumber} {subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)'}
+                          </s-text>
+                        )}
+                        <s-button
+                          commandFor="edit-subscription-modal"
+                          command="--show"
+                          variant="secondary"
+                          onClick={() => openEditModal(subscription)}
+                        >
+                          Edit
+                        </s-button>
                       </s-stack>
                     </s-box>
                   );
@@ -847,6 +726,186 @@ function Extension() {
           </s-stack>
         </s-box>
       </s-section>
+
+      {/* Edit subscription modal */}
+      <s-modal
+        ref={editModalRef}
+        id="edit-subscription-modal"
+        heading="Edit subscription"
+        accessibilityLabel="Edit subscription"
+        onHide={closeEditModal}
+      >
+        {editingSubscriptionId && (() => {
+          const subscription = (subscriptions || []).find((s) => s.id === editingSubscriptionId);
+          if (!subscription) return null;
+          return (
+            <s-stack gap="base">
+              <s-select
+                label="Status"
+                value={(editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase()}
+                onChange={(/** @type {any} */ e) => {
+                  const value = e?.currentTarget && e.currentTarget.value ? String(e.currentTarget.value) : 'active';
+                  const normalized = value === 'pause' ? 'pause' : 'active';
+                  setEditingStatus((prev) => ({ ...prev, [subscription.id]: normalized }));
+                }}
+              >
+                <s-option value="active">Active</s-option>
+                <s-option value="pause">Pause</s-option>
+              </s-select>
+
+              <s-stack gap="small">
+                {/* @ts-ignore s-number-field value is string-based in runtime */}
+                <s-number-field
+                  name={`frequency-number-${subscription.id}`}
+                  label="Delivery frequency"
+                  min={1}
+                  value={String((editingFrequency[subscription.id] ?? { number: subscription.frequencyNumber ?? 1 }).number)}
+                  onChange={(/** @type {any} */ e) => {
+                    const raw = e?.target && e.target.value ? String(e.target.value) : '';
+                    setEditingFrequency((prev) => ({
+                      ...prev,
+                      [subscription.id]: {
+                        ...(prev[subscription.id] ?? { number: 1, unit: 'week' }),
+                        number: raw,
+                      },
+                    }));
+                  }}
+                />
+                <s-select
+                  label="Frequency unit"
+                  value={(editingFrequency[subscription.id] ?? { unit: subscription.frequencyUnit ?? 'week' }).unit}
+                  onChange={(/** @type {any} */ e) => {
+                    const rawUnit = e?.currentTarget && e.currentTarget.value ? String(e.currentTarget.value) : 'week';
+                    const normalized = ['day', 'week', 'month'].includes(rawUnit) ? rawUnit : 'week';
+                    setEditingFrequency((prev) => ({
+                      ...prev,
+                      [subscription.id]: {
+                        ...(prev[subscription.id] ?? { number: 1, unit: 'week' }),
+                        unit: normalized,
+                      },
+                    }));
+                  }}
+                >
+                  <s-option value="day">Day(s)</s-option>
+                  <s-option value="week">Week(s)</s-option>
+                  <s-option value="month">Month(s)</s-option>
+                </s-select>
+              </s-stack>
+
+              <s-stack gap="base">
+                <s-text>Items in this subscription</s-text>
+                {(editingItems[subscription.id] || subscription.items || []).length > 0 ? (
+                  <s-stack gap="base">
+                    {(editingItems[subscription.id] ?? subscription.items ?? []).map((item, index) => {
+                      const details = variantDetails[item.variant_id];
+                      const displayTitle = details?.displayTitle || item.name || item.variant_id || 'Item';
+                      const displayPrice = details?.price || item.price;
+                      return (
+                        <s-box key={item.variant_id || index} padding="base" border="none" borderRadius="large">
+                          <s-stack direction="inline" gap="base">
+                            <s-stack gap="small">
+                              <s-text>
+                                {displayTitle}
+                              </s-text>
+                              {displayPrice && (
+                                <s-text>
+                                  {displayPrice}
+                                </s-text>
+                              )}
+                              <s-stack direction="inline" gap="base">
+                                <s-link onClick={() => updateLineItemQuantity(subscription.id, index, -1)}>
+                                  −
+                                </s-link>
+                                <s-text>
+                                  {item.quantity ?? 1}
+                                </s-text>
+                                <s-link onClick={() => updateLineItemQuantity(subscription.id, index, 1)}>
+                                  +
+                                </s-link>
+                                <s-link onClick={() => removeLineItem(subscription.id, index)}>
+                                  Remove
+                                </s-link>
+                              </s-stack>
+                            </s-stack>
+                          </s-stack>
+                        </s-box>
+                      );
+                    })}
+                  </s-stack>
+                ) : (
+                  <s-text>No items in this subscription.</s-text>
+                )}
+              </s-stack>
+
+              {subscription.createdAt && (
+                <s-text type="small">
+                  Started on: {subscription.createdAt}
+                </s-text>
+              )}
+
+              {subscriptionsError && (
+                <s-banner tone="critical">
+                  <s-text type="small">
+                    {subscriptionsError}
+                  </s-text>
+                </s-banner>
+              )}
+
+              {confirmingSubscriptionId === subscription.id ? (
+                <s-stack gap="base">
+                  <s-text>Delete subscription?</s-text>
+                  <s-text type="small">Existing orders are not affected.</s-text>
+                  <s-stack direction="inline" gap="base" justifyContent="space-between">
+                    <s-link onClick={() => setConfirmingSubscriptionId(null)}>
+                      Back
+                    </s-link>
+                    <s-button
+                      variant="primary"
+                      tone="critical"
+                      onClick={() => {
+                        pendingDeleteSubscriptionIdRef.current = subscription.id;
+                        editModalRef.current?.hideOverlay?.();
+                      }}
+                    >
+                      Delete subscription
+                    </s-button>
+                  </s-stack>
+                </s-stack>
+              ) : null}
+
+              {/* Footer: Delete left; Cancel + Save right */}
+              <s-stack direction="inline" gap="base" justifyContent="space-between">
+                <s-link
+                  onClick={() => setConfirmingSubscriptionId(subscription.id)}
+                >
+                  <s-text tone="critical">Delete</s-text>
+                </s-link>
+                <s-stack direction="inline" gap="base">
+                  <s-link
+                    ref={editModalCloseButtonRef}
+                    commandFor="edit-subscription-modal"
+                    command="--hide"
+                    onClick={closeEditModal}
+                  >
+                    Cancel
+                  </s-link>
+                  <s-button
+                    variant="primary"
+                    loading={savingSubscriptionId === editingSubscriptionId}
+                    onClick={async () => {
+                      if (!editingSubscriptionId) return;
+                      await handleSaveSubscriptionEdits(editingSubscriptionId);
+                      closeEditModalAndHide();
+                    }}
+                  >
+                    Save
+                  </s-button>
+                </s-stack>
+              </s-stack>
+            </s-stack>
+          );
+        })()}
+      </s-modal>
     </s-stack>
   );
 }
