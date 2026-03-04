@@ -19,6 +19,7 @@ function Extension() {
   const [deletingSubscriptionId, setDeletingSubscriptionId] = useState('');
   const [deletingCardId, setDeletingCardId] = useState('');
   const [confirmingCardId, setConfirmingCardId] = useState(null);
+  const [editingCardId, setEditingCardId] = useState(null);
   const [confirmingSubscriptionId, setConfirmingSubscriptionId] = useState(null);
   const [editingItems, setEditingItems] = useState({});
   const [editingStatus, setEditingStatus] = useState({});
@@ -28,8 +29,7 @@ function Extension() {
   const [editingSubscriptionId, setEditingSubscriptionId] = useState(null);
   const editModalRef = useRef(null);
   const editModalCloseButtonRef = useRef(null);
-  const removeCardModalCloseButtonRef = useRef(null);
-  const removeCardModalRef = useRef(null);
+  const editCardModalRef = useRef(null);
   const pendingDeleteSubscriptionIdRef = useRef(null);
   const pendingDeleteCardIdRef = useRef(null);
 
@@ -534,15 +534,19 @@ function Extension() {
     editModalRef.current?.hideOverlay?.();
   }, []);
 
+  const closeEditCardModal = useCallback(() => {
+    const pendingId = pendingDeleteCardIdRef.current;
+    if (pendingId) {
+      pendingDeleteCardIdRef.current = null;
+      handleDeleteCard(pendingId);
+    }
+    setEditingCardId(null);
+    setConfirmingCardId(null);
+  }, [handleDeleteCard]);
+
   return (
     <s-stack gap="small">
       {/* Moneris cards section */}
-      <s-button
-        variant="secondary"  // or "tertiary" depending on your design
-        tone="critical"
-      >
-        Delete
-      </s-button>
       <s-section>
         <s-stack gap="base">
           <s-stack direction="inline" gap="base">
@@ -576,24 +580,26 @@ function Extension() {
                   {cards.map((card) => (
                     <s-box key={card.id} padding="small" border="none" borderRadius="large">
                       <s-stack gap="small">
-                        <s-text>Card</s-text>
+                        <s-stack direction="inline" gap="base" justifyContent="space-between">
+                          <s-text>Card</s-text>
+                          {deletingCardId === card.id ? (
+                            <s-text type="small">Removing…</s-text>
+                          ) : (
+                            <s-link
+                              commandFor="edit-card-modal"
+                              command="--show"
+                              onClick={() => setEditingCardId(card.id)}
+                            >
+                              Edit
+                            </s-link>
+                          )}
+                        </s-stack>
                         <s-text>
                           Ending in: {card.last4}
                         </s-text>
                         <s-text type="small">
-                          Expires: {card.expiry}
+                          Expires: {card.expiry && String(card.expiry).length === 4 ? `${String(card.expiry).slice(0, 2)}/${String(card.expiry).slice(2)}` : card.expiry}
                         </s-text>
-                        {deletingCardId === card.id ? (
-                          <s-text type="small">Removing…</s-text>
-                        ) : (
-                          <s-link
-                            commandFor="remove-card-modal"
-                            command="--show"
-                            onClick={() => setConfirmingCardId(card.id)}
-                          >
-                            <s-text tone="critical">Delete</s-text>
-                          </s-link>
-                        )}
                       </s-stack>
                     </s-box>
                   ))}
@@ -610,45 +616,71 @@ function Extension() {
         </s-stack>
       </s-section>
 
-      {/* Remove card confirmation modal */}
+      {/* Edit card modal: view card details, only action is Delete (with confirm) */}
       <s-modal
-        ref={removeCardModalRef}
-        id="remove-card-modal"
-        heading="Remove card"
-        accessibilityLabel="Remove card confirmation"
-        onHide={() => {
-          const pendingId = pendingDeleteCardIdRef.current;
-          if (pendingId) {
-            pendingDeleteCardIdRef.current = null;
-            handleDeleteCard(pendingId);
-          }
-          setConfirmingCardId(null);
-        }}
+        ref={editCardModalRef}
+        id="edit-card-modal"
+        heading="Card"
+        accessibilityLabel="Edit card"
+        onHide={closeEditCardModal}
       >
-        <s-text>
-          Are you sure you want to remove this card?
-        </s-text>
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          loading={confirmingCardId != null && deletingCardId === confirmingCardId}
-          onClick={() => {
-            if (!confirmingCardId) return;
-            pendingDeleteCardIdRef.current = confirmingCardId;
-            removeCardModalRef.current?.hideOverlay?.();
-          }}
-        >
-          Yes
-        </s-button>
-        <s-button
-          ref={removeCardModalCloseButtonRef}
-          slot="secondary-actions"
-          variant="secondary"
-          commandFor="remove-card-modal"
-          command="--hide"
-        >
-          Cancel
-        </s-button>
+        {editingCardId && (() => {
+          const card = (cards || []).find((c) => c.id === editingCardId);
+          if (!card) return null;
+          const isConfirmView = confirmingCardId === editingCardId;
+          if (isConfirmView) {
+            return (
+              <s-stack gap="base">
+                <s-text>Are you sure you want to remove this card?</s-text>
+                <s-stack direction="inline" gap="base" justifyContent="space-between">
+                  <s-link onClick={() => setConfirmingCardId(null)}>
+                    Back
+                  </s-link>
+                  <s-button
+                    variant="primary"
+                    tone="critical"
+                    loading={deletingCardId === editingCardId}
+                    onClick={() => {
+                      pendingDeleteCardIdRef.current = editingCardId;
+                      editCardModalRef.current?.hideOverlay?.();
+                    }}
+                  >
+                    Yes
+                  </s-button>
+                </s-stack>
+              </s-stack>
+            );
+          }
+          return (
+            <s-stack gap="base">
+              <s-text>
+                Ending in: {card.last4}
+              </s-text>
+              <s-text type="small">
+                Expires: {card.expiry && String(card.expiry).length === 4 ? `${String(card.expiry).slice(0, 2)}/${String(card.expiry).slice(2)}` : card.expiry}
+              </s-text>
+              <s-stack direction="inline" gap="base" justifyContent="space-between">
+                <s-button
+                  variant="secondary"
+                  tone="critical"
+                  onClick={() => setConfirmingCardId(editingCardId)}
+                >
+                  Delete
+                </s-button>
+                <s-link
+                  commandFor="edit-card-modal"
+                  command="--hide"
+                  onClick={() => {
+                    setEditingCardId(null);
+                    setConfirmingCardId(null);
+                  }}
+                >
+                  Close
+                </s-link>
+              </s-stack>
+            </s-stack>
+          );
+        })()}
       </s-modal>
 
       {/* Subscriptions section */}
@@ -684,12 +716,25 @@ function Extension() {
                       borderRadius="large"
                     >
                       <s-stack gap="small">
-                        <s-text>
-                          {title}
-                        </s-text>
+                        <s-stack direction="inline" gap="base" justifyContent="space-between">
+                          <s-text>
+                            {title}
+                          </s-text>
+                          {deletingSubscriptionId === subscription.id ? (
+                            <s-text type="small">Removing…</s-text>
+                          ) : (
+                            <s-link
+                              commandFor="edit-subscription-modal"
+                              command="--show"
+                              onClick={() => openEditModal(subscription)}
+                            >
+                              Edit
+                            </s-link>
+                          )}
+                        </s-stack>
                         {subscription.status && (
                           <s-text type="small">
-                            Status: {subscription.status}
+                            Status: {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1).toLowerCase()}
                           </s-text>
                         )}
                         {subscription.nextBillingDate && (
@@ -699,17 +744,11 @@ function Extension() {
                         )}
                         {(subscription.frequencyNumber != null && subscription.frequencyUnit) && (
                           <s-text type="small">
-                            Delivery: every {subscription.frequencyNumber} {subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)'}
+                            Delivery: Every {subscription.frequencyNumber} {subscription.frequencyNumber === 1
+                              ? (subscription.frequencyUnit === 'day' ? 'day' : subscription.frequencyUnit === 'week' ? 'week' : 'month')
+                              : (subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)')}
                           </s-text>
                         )}
-                        <s-button
-                          commandFor="edit-subscription-modal"
-                          command="--show"
-                          variant="secondary"
-                          onClick={() => openEditModal(subscription)}
-                        >
-                          Edit
-                        </s-button>
                       </s-stack>
                     </s-box>
                   );
@@ -738,6 +777,33 @@ function Extension() {
         {editingSubscriptionId && (() => {
           const subscription = (subscriptions || []).find((s) => s.id === editingSubscriptionId);
           if (!subscription) return null;
+
+          const isDeleteConfirmView = confirmingSubscriptionId === subscription.id;
+
+          if (isDeleteConfirmView) {
+            return (
+              <s-stack gap="base">
+                <s-text>Delete subscription?</s-text>
+                <s-text type="small">Existing orders are not affected.</s-text>
+                <s-stack direction="inline" gap="base" justifyContent="space-between">
+                  <s-link onClick={() => setConfirmingSubscriptionId(null)}>
+                    Back
+                  </s-link>
+                  <s-button
+                    variant="primary"
+                    tone="critical"
+                    onClick={() => {
+                      pendingDeleteSubscriptionIdRef.current = subscription.id;
+                      editModalRef.current?.hideOverlay?.();
+                    }}
+                  >
+                    Delete subscription
+                  </s-button>
+                </s-stack>
+              </s-stack>
+            );
+          }
+
           return (
             <s-stack gap="base">
               <s-select
@@ -851,35 +917,14 @@ function Extension() {
                 </s-banner>
               )}
 
-              {confirmingSubscriptionId === subscription.id ? (
-                <s-stack gap="base">
-                  <s-text>Delete subscription?</s-text>
-                  <s-text type="small">Existing orders are not affected.</s-text>
-                  <s-stack direction="inline" gap="base" justifyContent="space-between">
-                    <s-link onClick={() => setConfirmingSubscriptionId(null)}>
-                      Back
-                    </s-link>
-                    <s-button
-                      variant="primary"
-                      tone="critical"
-                      onClick={() => {
-                        pendingDeleteSubscriptionIdRef.current = subscription.id;
-                        editModalRef.current?.hideOverlay?.();
-                      }}
-                    >
-                      Delete subscription
-                    </s-button>
-                  </s-stack>
-                </s-stack>
-              ) : null}
-
-              {/* Footer: Delete left; Cancel + Save right */}
               <s-stack direction="inline" gap="base" justifyContent="space-between">
-                <s-link
+                <s-button
+                  variant="secondary"
+                  tone="critical"
                   onClick={() => setConfirmingSubscriptionId(subscription.id)}
                 >
-                  <s-text tone="critical">Delete</s-text>
-                </s-link>
+                  Delete
+                </s-button>
                 <s-stack direction="inline" gap="base">
                   <s-link
                     ref={editModalCloseButtonRef}
