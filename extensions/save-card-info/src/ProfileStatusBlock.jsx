@@ -1,6 +1,8 @@
 import '@shopify/ui-extensions/preact';
 import {render} from 'preact';
 import {useCallback, useEffect, useRef, useState} from 'preact/hooks';
+// @ts-ignore: SVG asset import handled by bundler
+import editIconSrc from '../assets/svgexport-2.png';
 
 
 
@@ -24,6 +26,7 @@ function Extension() {
   const [editingItems, setEditingItems] = useState({});
   const [editingStatus, setEditingStatus] = useState({});
   const [editingFrequency, setEditingFrequency] = useState({});
+  const [editingMonerisCard, setEditingMonerisCard] = useState({});
   const [savingSubscriptionId, setSavingSubscriptionId] = useState('');
   const [variantDetails, setVariantDetails] = useState({});
   const [editingSubscriptionId, setEditingSubscriptionId] = useState(null);
@@ -32,7 +35,6 @@ function Extension() {
   const editCardModalRef = useRef(null);
   const pendingDeleteSubscriptionIdRef = useRef(null);
   const pendingDeleteCardIdRef = useRef(null);
-
   const API_VERSION = '2026-01';
   const getCustomerIdQuery = {
     query: `
@@ -268,6 +270,7 @@ function Extension() {
           items: subscriptionLineItems.items,
           frequencyNumber,
           frequencyUnit,
+          monerisCard: fieldValue('moneris_card') || '',
         };
 
         const ownerId = fieldValue('customer_id');
@@ -400,6 +403,7 @@ function Extension() {
     const freq = editingFrequency[subscriptionId] ?? { number: subscription?.frequencyNumber ?? 1, unit: subscription?.frequencyUnit ?? 'week' };
     const frequency_number = Math.max(1, parseInt(freq.number, 10) || 1);
     const frequency_unit = ['day', 'week', 'month'].includes(String(freq.unit).toLowerCase()) ? String(freq.unit).toLowerCase() : 'week';
+    const moneris_card = editingMonerisCard[subscriptionId] ?? subscription?.monerisCard ?? '';
 
     const subscription_line_items = {
       currency,
@@ -423,6 +427,7 @@ function Extension() {
           status,
           frequency_number,
           frequency_unit,
+          moneris_card,
         }),
       });
 
@@ -432,6 +437,7 @@ function Extension() {
 
       // Update local state immediately so Edit shows saved data without waiting for API refetch
       const savedStatus = editingStatus[subscriptionId] ?? subscription?.status ?? 'active';
+      const savedMonerisCard = editingMonerisCard[subscriptionId] ?? subscription?.monerisCard ?? '';
       setSubscriptions((current) => {
         const list = current || [];
         return list.map((s) => {
@@ -443,6 +449,7 @@ function Extension() {
             items,
             frequencyNumber: frequency_number,
             frequencyUnit: frequency_unit,
+            monerisCard: savedMonerisCard,
           };
         });
       });
@@ -465,6 +472,7 @@ function Extension() {
         delete next[subscriptionId];
         return next;
       });
+      setEditingMonerisCard((prev) => { const next = { ...prev }; delete next[subscriptionId]; return next; });
       // Don't refetch here: Shopify metaobjects can be delayed, and would overwrite our local update with stale data
     } catch (err) {
       console.error(err);
@@ -472,7 +480,7 @@ function Extension() {
     } finally {
       setSavingSubscriptionId('');
     }
-  }, [editingItems, editingStatus, editingFrequency, fetchCustomerId, subscriptions]);
+  }, [editingItems, editingStatus, editingFrequency, editingMonerisCard, fetchCustomerId, subscriptions]);
 
   const removeLineItem = useCallback((subscriptionId, index) => {
     setEditingItems((prev) => {
@@ -512,6 +520,7 @@ function Extension() {
         unit: subscription.frequencyUnit ?? 'week',
       },
     }));
+    setEditingMonerisCard((prev) => ({ ...prev, [subscription.id]: subscription.monerisCard ?? '' }));
   }, []);
 
   const closeEditModal = useCallback(() => {
@@ -526,6 +535,7 @@ function Extension() {
       setEditingItems((prev) => { const next = { ...prev }; delete next[id]; return next; });
       setEditingStatus((prev) => { const next = { ...prev }; delete next[id]; return next; });
       setEditingFrequency((prev) => { const next = { ...prev }; delete next[id]; return next; });
+      setEditingMonerisCard((prev) => { const next = { ...prev }; delete next[id]; return next; });
     }
     setConfirmingSubscriptionId(null);
   }, [editingSubscriptionId, handleDeleteSubscription]);
@@ -548,7 +558,7 @@ function Extension() {
     <s-stack gap="small">
       {/* Moneris cards section */}
       <s-section>
-        <s-stack gap="base">
+        <s-stack gap="large">
           <s-stack direction="inline" gap="base">
             <s-heading>Moneris payment methods</s-heading>
             <s-link onClick={handleSaveCard}>
@@ -575,11 +585,11 @@ function Extension() {
 
           {cards && !cardsLoading && !cardsError && (
             cards.length > 0 ? (
-              <s-stack gap="small">
-                <s-stack direction="inline" gap="base">
+              <s-stack gap="large">
+                <s-stack direction="inline" gap="large">
                   {cards.map((card) => (
-                    <s-box key={card.id} padding="small" border="none" borderRadius="large">
-                      <s-stack gap="small">
+                    <s-box key={card.id} padding="base" border="none" borderRadius="large">
+                      <s-stack gap="base">
                         <s-stack direction="inline" gap="base" justifyContent="space-between">
                           <s-text>Card</s-text>
                           {deletingCardId === card.id ? (
@@ -590,7 +600,7 @@ function Extension() {
                               command="--show"
                               onClick={() => setEditingCardId(card.id)}
                             >
-                              Edit
+                              <s-image src={editIconSrc} />
                             </s-link>
                           )}
                         </s-stack>
@@ -630,55 +640,59 @@ function Extension() {
           const isConfirmView = confirmingCardId === editingCardId;
           if (isConfirmView) {
             return (
-              <s-stack gap="base">
-                <s-text>Are you sure you want to remove this card?</s-text>
-                <s-stack direction="inline" gap="base" justifyContent="space-between">
-                  <s-link onClick={() => setConfirmingCardId(null)}>
-                    Back
-                  </s-link>
-                  <s-button
-                    variant="primary"
-                    tone="critical"
-                    loading={deletingCardId === editingCardId}
-                    onClick={() => {
-                      pendingDeleteCardIdRef.current = editingCardId;
-                      editCardModalRef.current?.hideOverlay?.();
-                    }}
-                  >
-                    Yes
-                  </s-button>
+              <s-box padding="base">
+                <s-stack gap="base">
+                  <s-text>Are you sure you want to remove this card?</s-text>
+                  <s-stack direction="inline" gap="base" justifyContent="space-between">
+                    <s-link onClick={() => setConfirmingCardId(null)}>
+                      Back
+                    </s-link>
+                    <s-button
+                      variant="primary"
+                      tone="critical"
+                      loading={deletingCardId === editingCardId}
+                      onClick={() => {
+                        pendingDeleteCardIdRef.current = editingCardId;
+                        editCardModalRef.current?.hideOverlay?.();
+                      }}
+                    >
+                      Yes
+                    </s-button>
+                  </s-stack>
                 </s-stack>
-              </s-stack>
+              </s-box>
             );
           }
           return (
-            <s-stack gap="base">
-              <s-text>
-                Ending in: {card.last4}
-              </s-text>
-              <s-text type="small">
-                Expires: {card.expiry && String(card.expiry).length === 4 ? `${String(card.expiry).slice(0, 2)}/${String(card.expiry).slice(2)}` : card.expiry}
-              </s-text>
-              <s-stack direction="inline" gap="base" justifyContent="space-between">
-                <s-button
-                  variant="secondary"
-                  tone="critical"
-                  onClick={() => setConfirmingCardId(editingCardId)}
-                >
-                  Delete
-                </s-button>
-                <s-link
-                  commandFor="edit-card-modal"
-                  command="--hide"
-                  onClick={() => {
-                    setEditingCardId(null);
-                    setConfirmingCardId(null);
-                  }}
-                >
-                  Close
-                </s-link>
+            <s-box padding="base">
+              <s-stack gap="base">
+                <s-text>
+                  Ending in: {card.last4}
+                </s-text>
+                <s-text type="small">
+                  Expires: {card.expiry && String(card.expiry).length === 4 ? `${String(card.expiry).slice(0, 2)}/${String(card.expiry).slice(2)}` : card.expiry}
+                </s-text>
+                <s-stack direction="inline" gap="base" justifyContent="space-between">
+                  <s-button
+                    variant="secondary"
+                    tone="critical"
+                    onClick={() => setConfirmingCardId(editingCardId)}
+                  >
+                    Delete
+                  </s-button>
+                  <s-link
+                    commandFor="edit-card-modal"
+                    command="--hide"
+                    onClick={() => {
+                      setEditingCardId(null);
+                      setConfirmingCardId(null);
+                    }}
+                  >
+                    Close
+                  </s-link>
+                </s-stack>
               </s-stack>
-            </s-stack>
+            </s-box>
           );
         })()}
       </s-modal>
@@ -686,7 +700,7 @@ function Extension() {
       {/* Subscriptions section */}
       <s-section heading="Subscriptions">
         <s-box padding="base" border="none" borderRadius="large">
-          <s-stack gap="base">
+          <s-stack gap="large">
             <s-text type="small">
               Manage your recurring orders and billing.
             </s-text>
@@ -704,22 +718,22 @@ function Extension() {
 
             {subscriptions && !subscriptionsLoading && !subscriptionsError && (
               subscriptions.length > 0 ? (
-                <s-stack direction="inline" gap="base">
-                {subscriptions.map((subscription) => {
-                  const title = subscription.title || subscription.name || 'Subscription';
+                <s-stack direction="inline" gap="large">
+                  {subscriptions.map((subscription) => {
+                    const title = subscription.title || subscription.name || 'Subscription';
 
-                  return (
-                    <s-box
-                      key={subscription.id}
-                      padding="small"
-                      border="none"
-                      borderRadius="large"
-                    >
-                      <s-stack gap="small">
-                        <s-stack direction="inline" gap="base" justifyContent="space-between">
-                          <s-text>
-                            {title}
-                          </s-text>
+                    return (
+                      <s-box
+                        key={subscription.id}
+                        padding="base"
+                        border="none"
+                        borderRadius="large"
+                      >
+                        <s-stack gap="base">
+                          <s-stack direction="inline" gap="base" justifyContent="space-between">
+                            <s-text>
+                              {title}
+                            </s-text>
                           {deletingSubscriptionId === subscription.id ? (
                             <s-text type="small">Removing…</s-text>
                           ) : (
@@ -728,33 +742,33 @@ function Extension() {
                               command="--show"
                               onClick={() => openEditModal(subscription)}
                             >
-                              Edit
+                              <s-image src={editIconSrc} />
                             </s-link>
                           )}
+                          </s-stack>
+                          {subscription.status && (
+                            <s-text type="small">
+                              Status: {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1).toLowerCase()}
+                            </s-text>
+                          )}
+                          {subscription.nextBillingDate && (
+                            <s-text type="small">
+                              Next billing: {subscription.nextBillingDate}
+                            </s-text>
+                          )}
+                          {(subscription.frequencyNumber != null && subscription.frequencyUnit) && (
+                            <s-text type="small">
+                              Delivery: Every {subscription.frequencyNumber} {subscription.frequencyNumber === 1
+                                ? (subscription.frequencyUnit === 'day' ? 'day' : subscription.frequencyUnit === 'week' ? 'week' : 'month')
+                                : (subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)')}
+                            </s-text>
+                          )}
                         </s-stack>
-                        {subscription.status && (
-                          <s-text type="small">
-                            Status: {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1).toLowerCase()}
-                          </s-text>
-                        )}
-                        {subscription.nextBillingDate && (
-                          <s-text type="small">
-                            Next billing: {subscription.nextBillingDate}
-                          </s-text>
-                        )}
-                        {(subscription.frequencyNumber != null && subscription.frequencyUnit) && (
-                          <s-text type="small">
-                            Delivery: Every {subscription.frequencyNumber} {subscription.frequencyNumber === 1
-                              ? (subscription.frequencyUnit === 'day' ? 'day' : subscription.frequencyUnit === 'week' ? 'week' : 'month')
-                              : (subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)')}
-                          </s-text>
-                        )}
-                      </s-stack>
-                    </s-box>
-                  );
-                })}
-              </s-stack>
-            ) : (
+                      </s-box>
+                    );
+                  })}
+                </s-stack>
+              ) : (
               <s-banner>
                 <s-text type="small">
                   You don&apos;t have any active subscriptions yet.
@@ -782,29 +796,32 @@ function Extension() {
 
           if (isDeleteConfirmView) {
             return (
-              <s-stack gap="base">
-                <s-text>Delete subscription?</s-text>
-                <s-text type="small">Existing orders are not affected.</s-text>
-                <s-stack direction="inline" gap="base" justifyContent="space-between">
-                  <s-link onClick={() => setConfirmingSubscriptionId(null)}>
-                    Back
-                  </s-link>
-                  <s-button
-                    variant="primary"
-                    tone="critical"
-                    onClick={() => {
-                      pendingDeleteSubscriptionIdRef.current = subscription.id;
-                      editModalRef.current?.hideOverlay?.();
-                    }}
-                  >
-                    Delete subscription
-                  </s-button>
+              <s-box padding="base">
+                <s-stack gap="base">
+                  <s-text>Delete subscription?</s-text>
+                  <s-text type="small">Existing orders are not affected.</s-text>
+                  <s-stack direction="inline" gap="base" justifyContent="space-between">
+                    <s-link onClick={() => setConfirmingSubscriptionId(null)}>
+                      Back
+                    </s-link>
+                    <s-button
+                      variant="primary"
+                      tone="critical"
+                      onClick={() => {
+                        pendingDeleteSubscriptionIdRef.current = subscription.id;
+                        editModalRef.current?.hideOverlay?.();
+                      }}
+                    >
+                      Delete subscription
+                    </s-button>
+                  </s-stack>
                 </s-stack>
-              </s-stack>
+              </s-box>
             );
           }
 
           return (
+            <s-box padding="base">
             <s-stack gap="base">
               <s-select
                 label="Status"
@@ -858,7 +875,22 @@ function Extension() {
                 </s-select>
               </s-stack>
 
-              <s-stack gap="base">
+              <s-select
+                label="Moneris card"
+                value={editingMonerisCard[subscription.id] ?? subscription.monerisCard ?? ''}
+                onChange={(/** @type {any} */ e) => {
+                  const value = e?.currentTarget?.value != null ? String(e.currentTarget.value) : '';
+                  setEditingMonerisCard((prev) => ({ ...prev, [subscription.id]: value }));
+                }}
+              >
+                {(cards || []).map((card) => (
+                  <s-option key={card.id} value={card.id}>
+                    Ending in {card.last4}
+                  </s-option>
+                ))}
+              </s-select>
+
+              <s-stack gap="large">
                 <s-text>Items in this subscription</s-text>
                 {(editingItems[subscription.id] || subscription.items || []).length > 0 ? (
                   <s-stack gap="base">
@@ -948,6 +980,7 @@ function Extension() {
                 </s-stack>
               </s-stack>
             </s-stack>
+            </s-box>
           );
         })()}
       </s-modal>
