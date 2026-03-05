@@ -1,9 +1,6 @@
 import '@shopify/ui-extensions/preact';
 import {render} from 'preact';
 import {useCallback, useEffect, useRef, useState} from 'preact/hooks';
-// @ts-ignore: SVG asset import handled by bundler
-import editIconSrc from '../assets/svgexport-2.png';
-
 
 
 export default async () => {
@@ -600,7 +597,7 @@ function Extension() {
                               command="--show"
                               onClick={() => setEditingCardId(card.id)}
                             >
-                              <s-image src={editIconSrc} />
+                              edit
                             </s-link>
                           )}
                         </s-stack>
@@ -742,11 +739,11 @@ function Extension() {
                               command="--show"
                               onClick={() => openEditModal(subscription)}
                             >
-                              <s-image src={editIconSrc} />
+                              edit
                             </s-link>
                           )}
-                          </s-stack>
-                          {subscription.status && (
+                        </s-stack>
+                        {subscription.status && (
                             <s-text type="small">
                               Status: {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1).toLowerCase()}
                             </s-text>
