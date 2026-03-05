@@ -24,12 +24,17 @@ function Extension() {
   const [editingStatus, setEditingStatus] = useState({});
   const [editingFrequency, setEditingFrequency] = useState({});
   const [editingMonerisCard, setEditingMonerisCard] = useState({});
+  const [editingShippingAddress, setEditingShippingAddress] = useState({});
+  const [editingBillingAddress, setEditingBillingAddress] = useState({});
+  const [customerAddresses, setCustomerAddresses] = useState([]);
   const [savingSubscriptionId, setSavingSubscriptionId] = useState('');
   const [variantDetails, setVariantDetails] = useState({});
   const [editingSubscriptionId, setEditingSubscriptionId] = useState(null);
+  const [agreeLoading, setAgreeLoading] = useState(false);
   const editModalRef = useRef(null);
   const editModalCloseButtonRef = useRef(null);
   const editCardModalRef = useRef(null);
+  const consentModalRef = useRef(null);
   const pendingDeleteSubscriptionIdRef = useRef(null);
   const pendingDeleteCardIdRef = useRef(null);
   const API_VERSION = '2026-01';
@@ -71,6 +76,7 @@ function Extension() {
     } catch (err) {
       console.error(err);
       alert('The card-saving service is temporarily unavailable. Please try again later.');
+      throw err;
     }
   }, [fetchCustomerId]);
 
@@ -258,6 +264,17 @@ function Extension() {
         const rawFreqUnit = (fieldValue('frequency_unit') || 'week').toLowerCase();
         const frequencyUnit = ['day', 'week', 'month'].includes(rawFreqUnit) ? rawFreqUnit : 'week';
 
+        let shipping_address = null;
+        let billing_address = null;
+        try {
+          const rawShipping = fieldValue('shipping_address');
+          if (rawShipping) shipping_address = JSON.parse(rawShipping);
+        } catch (_e) { /* ignore */ }
+        try {
+          const rawBilling = fieldValue('billing_address');
+          if (rawBilling) billing_address = JSON.parse(rawBilling);
+        } catch (_e) { /* ignore */ }
+
         const result = {
           id: node.id,
           status: fieldValue('status'),
@@ -268,6 +285,8 @@ function Extension() {
           frequencyNumber,
           frequencyUnit,
           monerisCard: fieldValue('moneris_card') || '',
+          shipping_address,
+          billing_address,
         };
 
         const ownerId = fieldValue('customer_id');
@@ -287,11 +306,78 @@ function Extension() {
     }
   }, [API_VERSION, fetchCustomerId]);
 
+  const loadCustomerAddresses = useCallback(async () => {
+    const query = {
+      query: `
+        query GetCustomerAddresses {
+          customer {
+            defaultAddress { id }
+            addresses(first: 50) {
+              nodes {
+                id
+                firstName
+                lastName
+                name
+                company
+                address1
+                address2
+                city
+                province
+                zoneCode
+                territoryCode
+                zip
+                phoneNumber
+                country
+              }
+            }
+          }
+        }
+      `,
+    };
+    try {
+      const response = await fetch(
+        `shopify://customer-account/api/${API_VERSION}/graphql.json`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(query),
+        },
+      );
+      const { data, errors } = await response.json();
+      if (errors?.length) return;
+      const defaultId = data?.customer?.defaultAddress?.id || null;
+      const nodes = data?.customer?.addresses?.nodes || [];
+      const mapped = nodes.map((node) => ({
+        id: node.id,
+        customer_id: null,
+        first_name: node.firstName || '',
+        last_name: node.lastName || '',
+        company: node.company || null,
+        address1: node.address1 || '',
+        address2: node.address2 || null,
+        city: node.city || '',
+        province: node.province || '',
+        country: node.country || '',
+        zip: node.zip || '',
+        phone: node.phoneNumber || null,
+        name: node.name || [node.firstName, node.lastName].filter(Boolean).join(' ') || '',
+        province_code: node.zoneCode || '',
+        country_code: node.territoryCode || '',
+        country_name: node.country || '',
+        default: defaultId ? node.id === defaultId : false,
+      }));
+      setCustomerAddresses(mapped);
+    } catch (err) {
+      console.error('Failed to load customer addresses:', err);
+    }
+  }, [API_VERSION]);
+
   useEffect(() => {
     // Load cards and subscriptions immediately so items are shown without needing a button click
     loadCards();
     loadSubscriptions();
-  }, [loadCards, loadSubscriptions]);
+    loadCustomerAddresses();
+  }, [loadCards, loadSubscriptions, loadCustomerAddresses]);
 
   const loadVariantDetails = useCallback(async (variantIds) => {
     if (!variantIds || variantIds.length === 0) return;
@@ -401,6 +487,10 @@ function Extension() {
     const frequency_number = Math.max(1, parseInt(freq.number, 10) || 1);
     const frequency_unit = ['day', 'week', 'month'].includes(String(freq.unit).toLowerCase()) ? String(freq.unit).toLowerCase() : 'week';
     const moneris_card = editingMonerisCard[subscriptionId] ?? subscription?.monerisCard ?? '';
+    const shipping_address_id = editingShippingAddress[subscriptionId] ?? subscription?.shipping_address?.id ?? '';
+    const billing_address_id = editingBillingAddress[subscriptionId] ?? subscription?.billing_address?.id ?? '';
+    const shipping_address = (customerAddresses || []).find((a) => a.id === shipping_address_id) ?? subscription?.shipping_address ?? null;
+    const billing_address = (customerAddresses || []).find((a) => a.id === billing_address_id) ?? subscription?.billing_address ?? null;
 
     const subscription_line_items = {
       currency,
@@ -425,6 +515,8 @@ function Extension() {
           frequency_number,
           frequency_unit,
           moneris_card,
+          shipping_address,
+          billing_address,
         }),
       });
 
@@ -435,6 +527,8 @@ function Extension() {
       // Update local state immediately so Edit shows saved data without waiting for API refetch
       const savedStatus = editingStatus[subscriptionId] ?? subscription?.status ?? 'active';
       const savedMonerisCard = editingMonerisCard[subscriptionId] ?? subscription?.monerisCard ?? '';
+      const savedShippingAddress = shipping_address;
+      const savedBillingAddress = billing_address;
       setSubscriptions((current) => {
         const list = current || [];
         return list.map((s) => {
@@ -447,6 +541,8 @@ function Extension() {
             frequencyNumber: frequency_number,
             frequencyUnit: frequency_unit,
             monerisCard: savedMonerisCard,
+            shipping_address: savedShippingAddress,
+            billing_address: savedBillingAddress,
           };
         });
       });
@@ -470,6 +566,8 @@ function Extension() {
         return next;
       });
       setEditingMonerisCard((prev) => { const next = { ...prev }; delete next[subscriptionId]; return next; });
+      setEditingShippingAddress((prev) => { const next = { ...prev }; delete next[subscriptionId]; return next; });
+      setEditingBillingAddress((prev) => { const next = { ...prev }; delete next[subscriptionId]; return next; });
       // Don't refetch here: Shopify metaobjects can be delayed, and would overwrite our local update with stale data
     } catch (err) {
       console.error(err);
@@ -477,7 +575,7 @@ function Extension() {
     } finally {
       setSavingSubscriptionId('');
     }
-  }, [editingItems, editingStatus, editingFrequency, editingMonerisCard, fetchCustomerId, subscriptions]);
+  }, [editingItems, editingStatus, editingFrequency, editingMonerisCard, editingShippingAddress, editingBillingAddress, customerAddresses, fetchCustomerId, subscriptions]);
 
   const removeLineItem = useCallback((subscriptionId, index) => {
     setEditingItems((prev) => {
@@ -518,7 +616,29 @@ function Extension() {
       },
     }));
     setEditingMonerisCard((prev) => ({ ...prev, [subscription.id]: subscription.monerisCard ?? '' }));
-  }, []);
+    const addrs = customerAddresses || [];
+    const matchAddr = (saved) => {
+      if (!saved) return addrs[0]?.id ?? '';
+      if (addrs.some((a) => a.id === saved.id)) return saved.id;
+      const byLocation = addrs.find(
+        (a) =>
+          (a.address1 || '') === (saved.address1 || '') &&
+          (a.city || '') === (saved.city || '') &&
+          (a.zip || '') === (saved.zip || ''),
+      );
+      return byLocation?.id ?? addrs[0]?.id ?? '';
+    };
+    const matchShippingId = matchAddr(subscription.shipping_address);
+    const matchBillingId = matchAddr(subscription.billing_address);
+    setEditingShippingAddress((prev) => ({
+      ...prev,
+      [subscription.id]: matchShippingId,
+    }));
+    setEditingBillingAddress((prev) => ({
+      ...prev,
+      [subscription.id]: matchBillingId,
+    }));
+  }, [customerAddresses]);
 
   const closeEditModal = useCallback(() => {
     const pendingSubId = pendingDeleteSubscriptionIdRef.current;
@@ -533,9 +653,21 @@ function Extension() {
       setEditingStatus((prev) => { const next = { ...prev }; delete next[id]; return next; });
       setEditingFrequency((prev) => { const next = { ...prev }; delete next[id]; return next; });
       setEditingMonerisCard((prev) => { const next = { ...prev }; delete next[id]; return next; });
+      setEditingShippingAddress((prev) => { const next = { ...prev }; delete next[id]; return next; });
+      setEditingBillingAddress((prev) => { const next = { ...prev }; delete next[id]; return next; });
     }
     setConfirmingSubscriptionId(null);
   }, [editingSubscriptionId, handleDeleteSubscription]);
+
+  const formatAddressLabel = useCallback((addr) => {
+    if (!addr || typeof addr !== 'object') return 'Select address';
+    const name = addr.name || [addr.first_name, addr.last_name].filter(Boolean).join(' ') || '';
+    const line1 = addr.address1 || '';
+    const city = addr.city || '';
+    const region = addr.province_code || addr.zoneCode || addr.province || '';
+    const parts = [name, line1, city, region].filter(Boolean);
+    return parts.length ? parts.join(', ') : 'Select address';
+  }, []);
 
   const closeEditModalAndHide = useCallback(() => {
     editModalRef.current?.hideOverlay?.();
@@ -553,12 +685,25 @@ function Extension() {
 
   return (
     <s-stack gap="small">
+      {agreeLoading && (
+        <s-box padding="large">
+          <s-stack gap="base" alignItems="center">
+            <s-spinner size="large" accessibilityLabel="Opening secure payment page" />
+            <s-text>Opening secure payment page… Please wait.</s-text>
+          </s-stack>
+        </s-box>
+      )}
+      {!agreeLoading && (
+        <>
       {/* Moneris cards section */}
       <s-section>
         <s-stack gap="large">
-          <s-stack direction="inline" gap="base">
+          <s-stack direction="inline" gap="base" alignItems="center">
             <s-heading>Moneris payment methods</s-heading>
-            <s-link onClick={handleSaveCard}>
+            <s-link
+              commandFor="consent-modal"
+              command="--show"
+            >
               + Add
             </s-link>
           </s-stack>
@@ -585,22 +730,9 @@ function Extension() {
               <s-stack gap="large">
                 <s-stack direction="inline" gap="large">
                   {cards.map((card) => (
-                    <s-box key={card.id} padding="base" border="none" borderRadius="large">
+                    <s-stack key={card.id} direction="inline" gap="large">
                       <s-stack gap="base">
-                        <s-stack direction="inline" gap="base" justifyContent="space-between">
-                          <s-text>Card</s-text>
-                          {deletingCardId === card.id ? (
-                            <s-text type="small">Removing…</s-text>
-                          ) : (
-                            <s-link
-                              commandFor="edit-card-modal"
-                              command="--show"
-                              onClick={() => setEditingCardId(card.id)}
-                            >
-                              edit
-                            </s-link>
-                          )}
-                        </s-stack>
+                        <s-text>Card</s-text>
                         <s-text>
                           Ending in: {card.last4}
                         </s-text>
@@ -608,7 +740,20 @@ function Extension() {
                           Expires: {card.expiry && String(card.expiry).length === 4 ? `${String(card.expiry).slice(0, 2)}/${String(card.expiry).slice(2)}` : card.expiry}
                         </s-text>
                       </s-stack>
-                    </s-box>
+                      <s-stack gap="base">
+                      {deletingCardId === card.id ? (
+                        <s-text type="small">Removing…</s-text>
+                      ) : (
+                        <s-link
+                          commandFor="edit-card-modal"
+                          command="--show"
+                          onClick={() => setEditingCardId(card.id)}
+                        >
+                          edit
+                        </s-link>
+                      )}
+                      </s-stack>
+                    </s-stack>
                   ))}
                 </s-stack>
               </s-stack>
@@ -622,6 +767,55 @@ function Extension() {
           )}
         </s-stack>
       </s-section>
+
+      {/* Consent modal: must agree before saving a card or using subscription features */}
+      <s-modal
+        ref={consentModalRef}
+        id="consent-modal"
+        heading="Third-party payment and subscription terms"
+        accessibilityLabel="Consent agreement"
+        onHide={() => {}}
+      >
+        <s-box padding="base">
+          <s-stack gap="base">
+            <s-text>
+              Before you save a payment method or use subscription features, please read and accept the following.
+            </s-text>
+            <s-text type="small">
+              <strong>This feature is not provided by Shopify.</strong> Saving payment methods and managing subscriptions on this page is a custom solution built by Bayshore (the merchant) and is separate from Shopify&apos;s native checkout, payment, and subscription services. Shopify does not operate, endorse, or guarantee this feature.
+            </s-text>
+            <s-text type="small">
+              Your payment details and subscription data will be collected and processed by or on behalf of the merchant and their chosen payment and subscription providers, in accordance with the merchant&apos;s privacy policy and applicable law. This may involve redirecting you to a secure third-party page to add a card.
+            </s-text>
+            <s-text type="small">
+              By clicking &quot;I agree&quot;, you confirm that you have read this notice, understand that this is a third-party feature and not a Shopify service, and consent to use it. You can cancel without agreeing; no payment method or subscription will be added.
+            </s-text>
+            <s-stack direction="inline" gap="base" justifyContent="space-between">
+              <s-link
+                commandFor="consent-modal"
+                command="--hide"
+              >
+                Cancel
+              </s-link>
+              <s-button
+                variant="primary"
+                onClick={() => {
+                  consentModalRef.current?.hideOverlay?.();
+                  setAgreeLoading(true);
+                  handleSaveCard()
+                    .then(() => {
+                      // Keep loading visible until the new tab has had time to open and load
+                      setTimeout(() => setAgreeLoading(false), 2500);
+                    })
+                    .catch(() => setAgreeLoading(false));
+                }}
+              >
+                I agree
+              </s-button>
+            </s-stack>
+          </s-stack>
+        </s-box>
+      </s-modal>
 
       {/* Edit card modal: view card details, only action is Delete (with confirm) */}
       <s-modal
@@ -696,8 +890,7 @@ function Extension() {
 
       {/* Subscriptions section */}
       <s-section heading="Subscriptions">
-        <s-box padding="base" border="none" borderRadius="large">
-          <s-stack gap="large">
+        <s-stack gap="large">
             <s-text type="small">
               Manage your recurring orders and billing.
             </s-text>
@@ -715,55 +908,51 @@ function Extension() {
 
             {subscriptions && !subscriptionsLoading && !subscriptionsError && (
               subscriptions.length > 0 ? (
-                <s-stack direction="inline" gap="large">
-                  {subscriptions.map((subscription) => {
-                    const title = subscription.title || subscription.name || 'Subscription';
-
-                    return (
-                      <s-box
-                        key={subscription.id}
-                        padding="base"
-                        border="none"
-                        borderRadius="large"
-                      >
-                        <s-stack gap="base">
-                          <s-stack direction="inline" gap="base" justifyContent="space-between">
+                <s-stack gap="large">
+                  <s-stack direction="inline" gap="large">
+                    {subscriptions.map((subscription) => {
+                      const title = subscription.title || subscription.name || 'Subscription';
+                      return (
+                        <s-stack key={subscription.id} direction="inline" gap="large">
+                          <s-stack gap="base">
                             <s-text>
                               {title}
                             </s-text>
-                          {deletingSubscriptionId === subscription.id ? (
-                            <s-text type="small">Removing…</s-text>
-                          ) : (
-                            <s-link
-                              commandFor="edit-subscription-modal"
-                              command="--show"
-                              onClick={() => openEditModal(subscription)}
-                            >
-                              edit
-                            </s-link>
-                          )}
+                            {subscription.status && (
+                              <s-text type="small">
+                                Status: {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1).toLowerCase()}
+                              </s-text>
+                            )}
+                            {subscription.nextBillingDate && (
+                              <s-text type="small">
+                                Next billing: {subscription.nextBillingDate}
+                              </s-text>
+                            )}
+                            {(subscription.frequencyNumber != null && subscription.frequencyUnit) && (
+                              <s-text type="small">
+                                Delivery: Every {subscription.frequencyNumber} {subscription.frequencyNumber === 1
+                                  ? (subscription.frequencyUnit === 'day' ? 'day' : subscription.frequencyUnit === 'week' ? 'week' : 'month')
+                                  : (subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)')}
+                              </s-text>
+                            )}
+                          </s-stack>
+                          <s-stack gap="base">
+                            {deletingSubscriptionId === subscription.id ? (
+                              <s-text type="small">Removing…</s-text>
+                            ) : (
+                              <s-link
+                                commandFor="edit-subscription-modal"
+                                command="--show"
+                                onClick={() => openEditModal(subscription)}
+                              >
+                                Edit
+                              </s-link>
+                            )}
+                          </s-stack>
                         </s-stack>
-                        {subscription.status && (
-                            <s-text type="small">
-                              Status: {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1).toLowerCase()}
-                            </s-text>
-                          )}
-                          {subscription.nextBillingDate && (
-                            <s-text type="small">
-                              Next billing: {subscription.nextBillingDate}
-                            </s-text>
-                          )}
-                          {(subscription.frequencyNumber != null && subscription.frequencyUnit) && (
-                            <s-text type="small">
-                              Delivery: Every {subscription.frequencyNumber} {subscription.frequencyNumber === 1
-                                ? (subscription.frequencyUnit === 'day' ? 'day' : subscription.frequencyUnit === 'week' ? 'week' : 'month')
-                                : (subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)')}
-                            </s-text>
-                          )}
-                        </s-stack>
-                      </s-box>
-                    );
-                  })}
+                      );
+                    })}
+                  </s-stack>
                 </s-stack>
               ) : (
               <s-banner>
@@ -773,8 +962,7 @@ function Extension() {
               </s-banner>
             )
           )}
-          </s-stack>
-        </s-box>
+        </s-stack>
       </s-section>
 
       {/* Edit subscription modal */}
@@ -873,7 +1061,7 @@ function Extension() {
               </s-stack>
 
               <s-select
-                label="Moneris card"
+                label="Payment method"
                 value={editingMonerisCard[subscription.id] ?? subscription.monerisCard ?? ''}
                 onChange={(/** @type {any} */ e) => {
                   const value = e?.currentTarget?.value != null ? String(e.currentTarget.value) : '';
@@ -885,6 +1073,44 @@ function Extension() {
                     Ending in {card.last4}
                   </s-option>
                 ))}
+              </s-select>
+
+              <s-select
+                label="Shipping address"
+                value={editingShippingAddress[subscription.id] ?? subscription.shipping_address?.id ?? (customerAddresses[0]?.id ?? '')}
+                onChange={(/** @type {any} */ e) => {
+                  const value = e?.currentTarget?.value != null ? String(e.currentTarget.value) : '';
+                  setEditingShippingAddress((prev) => ({ ...prev, [subscription.id]: value }));
+                }}
+              >
+                {(customerAddresses || []).length === 0 ? (
+                  <s-option value="">No saved addresses</s-option>
+                ) : (
+                  (customerAddresses || []).map((addr) => (
+                    <s-option key={addr.id} value={addr.id}>
+                      {formatAddressLabel(addr)}
+                    </s-option>
+                  ))
+                )}
+              </s-select>
+
+              <s-select
+                label="Billing address"
+                value={editingBillingAddress[subscription.id] ?? subscription.billing_address?.id ?? (customerAddresses[0]?.id ?? '')}
+                onChange={(/** @type {any} */ e) => {
+                  const value = e?.currentTarget?.value != null ? String(e.currentTarget.value) : '';
+                  setEditingBillingAddress((prev) => ({ ...prev, [subscription.id]: value }));
+                }}
+              >
+                {(customerAddresses || []).length === 0 ? (
+                  <s-option value="">No saved addresses</s-option>
+                ) : (
+                  (customerAddresses || []).map((addr) => (
+                    <s-option key={addr.id} value={addr.id}>
+                      {formatAddressLabel(addr)}
+                    </s-option>
+                  ))
+                )}
               </s-select>
 
               <s-stack gap="large">
@@ -981,6 +1207,8 @@ function Extension() {
           );
         })()}
       </s-modal>
+        </>
+      )}
     </s-stack>
   );
 }
