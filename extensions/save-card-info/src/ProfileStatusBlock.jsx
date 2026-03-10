@@ -22,7 +22,6 @@ function Extension() {
   const [confirmingSubscriptionId, setConfirmingSubscriptionId] = useState(null);
   const [editingItems, setEditingItems] = useState({});
   const [editingStatus, setEditingStatus] = useState({});
-  const [editingFrequency, setEditingFrequency] = useState({});
   const [editingMonerisCard, setEditingMonerisCard] = useState({});
   const [editingShippingAddress, setEditingShippingAddress] = useState({});
   const [editingBillingAddress, setEditingBillingAddress] = useState({});
@@ -175,7 +174,7 @@ function Extension() {
         };
 
         const ownerId = fieldValue('customer_id');
-        if (ownerId && ownerId !== customerId) {
+        if (!ownerId || ownerId !== customerId) {
           return null;
         }
 
@@ -290,7 +289,7 @@ function Extension() {
         };
 
         const ownerId = fieldValue('customer_id');
-        if (ownerId && ownerId !== customerId) {
+        if (!ownerId || ownerId !== customerId) {
           return null;
         }
 
@@ -483,9 +482,8 @@ function Extension() {
     const subscription = (subscriptions || []).find((s) => s.id === subscriptionId);
     const currency = subscription?.subscriptionLineItems?.currency || 'CAD';
     const status = editingStatus[subscriptionId] ?? subscription?.status ?? 'active';
-    const freq = editingFrequency[subscriptionId] ?? { number: subscription?.frequencyNumber ?? 1, unit: subscription?.frequencyUnit ?? 'week' };
-    const frequency_number = Math.max(1, parseInt(freq.number, 10) || 1);
-    const frequency_unit = ['day', 'week', 'month'].includes(String(freq.unit).toLowerCase()) ? String(freq.unit).toLowerCase() : 'week';
+    const frequency_number = Math.max(1, parseInt(subscription?.frequencyNumber ?? 1, 10) || 1);
+    const frequency_unit = ['day', 'week', 'month'].includes(String(subscription?.frequencyUnit ?? 'week').toLowerCase()) ? String(subscription?.frequencyUnit ?? 'week').toLowerCase() : 'week';
     const moneris_card = editingMonerisCard[subscriptionId] ?? subscription?.monerisCard ?? '';
     const shipping_address_id = editingShippingAddress[subscriptionId] ?? subscription?.shipping_address?.id ?? '';
     const billing_address_id = editingBillingAddress[subscriptionId] ?? subscription?.billing_address?.id ?? '';
@@ -560,11 +558,6 @@ function Extension() {
         delete next[subscriptionId];
         return next;
       });
-      setEditingFrequency((prev) => {
-        const next = { ...prev };
-        delete next[subscriptionId];
-        return next;
-      });
       setEditingMonerisCard((prev) => { const next = { ...prev }; delete next[subscriptionId]; return next; });
       setEditingShippingAddress((prev) => { const next = { ...prev }; delete next[subscriptionId]; return next; });
       setEditingBillingAddress((prev) => { const next = { ...prev }; delete next[subscriptionId]; return next; });
@@ -575,7 +568,7 @@ function Extension() {
     } finally {
       setSavingSubscriptionId('');
     }
-  }, [editingItems, editingStatus, editingFrequency, editingMonerisCard, editingShippingAddress, editingBillingAddress, customerAddresses, fetchCustomerId, subscriptions]);
+  }, [editingItems, editingStatus, editingMonerisCard, editingShippingAddress, editingBillingAddress, customerAddresses, fetchCustomerId, subscriptions]);
 
   const removeLineItem = useCallback((subscriptionId, index) => {
     setEditingItems((prev) => {
@@ -607,13 +600,6 @@ function Extension() {
     setEditingStatus((prev) => ({
       ...prev,
       [subscription.id]: (subscription.status || 'active').toLowerCase(),
-    }));
-    setEditingFrequency((prev) => ({
-      ...prev,
-      [subscription.id]: {
-        number: subscription.frequencyNumber ?? 1,
-        unit: subscription.frequencyUnit ?? 'week',
-      },
     }));
     setEditingMonerisCard((prev) => ({ ...prev, [subscription.id]: subscription.monerisCard ?? '' }));
     const addrs = customerAddresses || [];
@@ -651,7 +637,6 @@ function Extension() {
     if (id) {
       setEditingItems((prev) => { const next = { ...prev }; delete next[id]; return next; });
       setEditingStatus((prev) => { const next = { ...prev }; delete next[id]; return next; });
-      setEditingFrequency((prev) => { const next = { ...prev }; delete next[id]; return next; });
       setEditingMonerisCard((prev) => { const next = { ...prev }; delete next[id]; return next; });
       setEditingShippingAddress((prev) => { const next = { ...prev }; delete next[id]; return next; });
       setEditingBillingAddress((prev) => { const next = { ...prev }; delete next[id]; return next; });
@@ -684,7 +669,7 @@ function Extension() {
   }, [handleDeleteCard]);
 
   return (
-    <s-stack gap="small">
+    <s-stack gap="large">
       {agreeLoading && (
         <s-box padding="large">
           <s-stack gap="base" alignItems="center">
@@ -704,7 +689,7 @@ function Extension() {
               commandFor="consent-modal"
               command="--show"
             >
-              + Add
+              <s-text type="strong">+ Add</s-text>
             </s-link>
           </s-stack>
           <s-banner>
@@ -749,7 +734,7 @@ function Extension() {
                           command="--show"
                           onClick={() => setEditingCardId(card.id)}
                         >
-                          edit
+                          <s-text type="strong">Edit</s-text>
                         </s-link>
                       )}
                       </s-stack>
@@ -891,9 +876,11 @@ function Extension() {
       {/* Subscriptions section */}
       <s-section heading="Subscriptions">
         <s-stack gap="large">
-            <s-text type="small">
-              Manage your recurring orders and billing.
-            </s-text>
+            <s-banner>
+              <s-text type="small">
+              Please note that standard shipment takes 2–3 business days for Ontario shipments, and 3–5 business days for shipments outside Ontario.
+              </s-text>
+            </s-banner>
             {subscriptionsLoading && (
               <s-text type="small">Loading subscriptions…</s-text>
             )}
@@ -925,12 +912,12 @@ function Extension() {
                             )}
                             {subscription.nextBillingDate && (
                               <s-text type="small">
-                                Next billing: {subscription.nextBillingDate}
+                                Next shipment: {subscription.nextBillingDate}
                               </s-text>
                             )}
                             {(subscription.frequencyNumber != null && subscription.frequencyUnit) && (
                               <s-text type="small">
-                                Delivery: Every {subscription.frequencyNumber} {subscription.frequencyNumber === 1
+                                Shipment: Every {subscription.frequencyNumber} {subscription.frequencyNumber === 1
                                   ? (subscription.frequencyUnit === 'day' ? 'day' : subscription.frequencyUnit === 'week' ? 'week' : 'month')
                                   : (subscription.frequencyUnit === 'day' ? 'day(s)' : subscription.frequencyUnit === 'week' ? 'week(s)' : 'month(s)')}
                               </s-text>
@@ -945,7 +932,7 @@ function Extension() {
                                 command="--show"
                                 onClick={() => openEditModal(subscription)}
                               >
-                                Edit
+                                <s-text type="strong">Edit</s-text>
                               </s-link>
                             )}
                           </s-stack>
@@ -1009,7 +996,7 @@ function Extension() {
             <s-box padding="base">
             <s-stack gap="base">
               <s-select
-                label="Status"
+                label="Subscription status"
                 value={(editingStatus[subscription.id] ?? subscription.status ?? 'active').toLowerCase()}
                 onChange={(/** @type {any} */ e) => {
                   const value = e?.currentTarget && e.currentTarget.value ? String(e.currentTarget.value) : 'active';
@@ -1018,65 +1005,11 @@ function Extension() {
                 }}
               >
                 <s-option value="active">Active</s-option>
-                <s-option value="pause">Pause</s-option>
-              </s-select>
-
-              <s-stack gap="small">
-                {/* @ts-ignore s-number-field value is string-based in runtime */}
-                <s-number-field
-                  name={`frequency-number-${subscription.id}`}
-                  label="Delivery frequency"
-                  min={1}
-                  value={String((editingFrequency[subscription.id] ?? { number: subscription.frequencyNumber ?? 1 }).number)}
-                  onChange={(/** @type {any} */ e) => {
-                    const raw = e?.target && e.target.value ? String(e.target.value) : '';
-                    setEditingFrequency((prev) => ({
-                      ...prev,
-                      [subscription.id]: {
-                        ...(prev[subscription.id] ?? { number: 1, unit: 'week' }),
-                        number: raw,
-                      },
-                    }));
-                  }}
-                />
-                <s-select
-                  label="Frequency unit"
-                  value={(editingFrequency[subscription.id] ?? { unit: subscription.frequencyUnit ?? 'week' }).unit}
-                  onChange={(/** @type {any} */ e) => {
-                    const rawUnit = e?.currentTarget && e.currentTarget.value ? String(e.currentTarget.value) : 'week';
-                    const normalized = ['day', 'week', 'month'].includes(rawUnit) ? rawUnit : 'week';
-                    setEditingFrequency((prev) => ({
-                      ...prev,
-                      [subscription.id]: {
-                        ...(prev[subscription.id] ?? { number: 1, unit: 'week' }),
-                        unit: normalized,
-                      },
-                    }));
-                  }}
-                >
-                  <s-option value="day">Day(s)</s-option>
-                  <s-option value="week">Week(s)</s-option>
-                  <s-option value="month">Month(s)</s-option>
-                </s-select>
-              </s-stack>
-
-              <s-select
-                label="Payment method"
-                value={editingMonerisCard[subscription.id] ?? subscription.monerisCard ?? ''}
-                onChange={(/** @type {any} */ e) => {
-                  const value = e?.currentTarget?.value != null ? String(e.currentTarget.value) : '';
-                  setEditingMonerisCard((prev) => ({ ...prev, [subscription.id]: value }));
-                }}
-              >
-                {(cards || []).map((card) => (
-                  <s-option key={card.id} value={card.id}>
-                    Ending in {card.last4}
-                  </s-option>
-                ))}
+                <s-option value="pause">Paused</s-option>
               </s-select>
 
               <s-select
-                label="Shipping address"
+                label="Delivery address"
                 value={editingShippingAddress[subscription.id] ?? subscription.shipping_address?.id ?? (customerAddresses[0]?.id ?? '')}
                 onChange={(/** @type {any} */ e) => {
                   const value = e?.currentTarget?.value != null ? String(e.currentTarget.value) : '';
@@ -1113,8 +1046,23 @@ function Extension() {
                 )}
               </s-select>
 
+              <s-select
+                label="Payment card"
+                value={editingMonerisCard[subscription.id] ?? subscription.monerisCard ?? ''}
+                onChange={(/** @type {any} */ e) => {
+                  const value = e?.currentTarget?.value != null ? String(e.currentTarget.value) : '';
+                  setEditingMonerisCard((prev) => ({ ...prev, [subscription.id]: value }));
+                }}
+              >
+                {(cards || []).map((card) => (
+                  <s-option key={card.id} value={card.id}>
+                    Ending in {card.last4}
+                  </s-option>
+                ))}
+              </s-select>
+
               <s-stack gap="large">
-                <s-text>Items in this subscription</s-text>
+                <s-text>Subscription items</s-text>
                 {(editingItems[subscription.id] || subscription.items || []).length > 0 ? (
                   <s-stack gap="base">
                     {(editingItems[subscription.id] ?? subscription.items ?? []).map((item, index) => {
