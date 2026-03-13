@@ -2,6 +2,8 @@ import '@shopify/ui-extensions/preact';
 import {render} from 'preact';
 import {useCallback, useEffect, useRef, useState} from 'preact/hooks';
 
+const BASE_URL = 'https://9e5d-184-148-133-49.ngrok-free.app';
+
 
 export default async () => {
   render(<Extension />, document.body);
@@ -63,7 +65,7 @@ function Extension() {
   }, []);
 
   const handleSaveCard = useCallback(async () => {
-    const url = 'https://3348-184-148-133-49.ngrok-free.app/create-customer-session/save-card';
+    const url = `${BASE_URL}/create-customer-session/save-card`;
 
     try {
       const customerId = await fetchCustomerId();
@@ -82,7 +84,7 @@ function Extension() {
   const handleDeleteCard = useCallback(async (cardId) => {
     // TODO: point this to your backend endpoint that deletes
     // the moneris_card metaobject and vault token.
-    const url = 'https://3348-184-148-133-49.ngrok-free.app/card/delete';
+    const url = `${BASE_URL}/card/delete`;
 
     setDeletingCardId(cardId);
     setCardsError('');
@@ -443,7 +445,7 @@ function Extension() {
   const handleDeleteSubscription = useCallback(async (subscriptionId) => {
     // TODO: point this to your backend endpoint that deletes
     // the subscription_order metaobject and any related data.
-    const url = 'https://3348-184-148-133-49.ngrok-free.app/api/subscription/delete';
+    const url = `${BASE_URL}/api/subscription/delete`;
 
     setDeletingSubscriptionId(subscriptionId);
     setSubscriptionsError('');
@@ -474,7 +476,7 @@ function Extension() {
   }, [fetchCustomerId]);
 
   const handleSaveSubscriptionEdits = useCallback(async (subscriptionId) => {
-    const url = 'https://3348-184-148-133-49.ngrok-free.app/api/subscription/update';
+    const url = `${BASE_URL}/api/subscription/update`;
     const items = editingItems[subscriptionId];
 
     if (items === undefined) return;
