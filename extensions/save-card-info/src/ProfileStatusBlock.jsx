@@ -2,7 +2,7 @@ import '@shopify/ui-extensions/preact';
 import {render} from 'preact';
 import {useCallback, useEffect, useRef, useState} from 'preact/hooks';
 
-const BASE_URL = 'https://moneris-checkout-app.vercel.app/';
+const BASE_URL = 'https://moneris-checkout-app.vercel.app';
 
 
 export default async () => {
